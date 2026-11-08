@@ -1,0 +1,9 @@
+# Local clone of the csp-sdk library — used as a dependency, not tracked here.
+# See csp/pyproject.toml (package `csp-sdk`, imports as `csp`).
+# Install with: uv pip install --python .venv/bin/python -e ./csp
+csp/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
