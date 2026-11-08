@@ -19,3 +19,6 @@ dist/
 
 # Colab diagnostic artifacts (regenerated per run).
 colab_artifacts/
+
+# ark-colab.sh local runs, logs, downloads, and session pointer (no creds).
+artifacts/

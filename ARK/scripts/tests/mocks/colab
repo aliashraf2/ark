@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# Mock `colab` CLI for ark-colab.sh tests. Behaviour is driven by env vars:
+#   MOCK_COLAB_AUTH=0            every command fails as unauthenticated (exit 1)
+#   MOCK_COLAB_SESSIONS="a b"    sessions listed / known to status
+#   MOCK_COLAB_FAIL_<SUBCMD>=1   that subcommand exits 1, with SUBCMD uppercased
+#                                (e.g. MOCK_COLAB_FAIL_NEW=1)
+#   MOCK_COLAB_GPU=T4            accelerator shown by status
+#   MOCK_COLAB_LOG=path          append one line per invocation (raw args)
+#   MOCK_COLAB_STAGEDIR=dir      upload copies the local file here (for content
+#                                assertions); download writes fixture bytes.
+#   MOCK_COLAB_SESSIONS_FILE=f   stateful session list: `new` appends, `stop`
+#                                removes, `sessions`/`status` consult it.
+set -uo pipefail
+
+session_list() {
+  printf '%s' "${MOCK_COLAB_SESSIONS:-}"
+  if [ -n "${MOCK_COLAB_SESSIONS_FILE:-}" ] && [ -f "$MOCK_COLAB_SESSIONS_FILE" ]; then
+    printf ' %s' "$(tr '\n' ' ' < "$MOCK_COLAB_SESSIONS_FILE")"
+  fi
+}
+
+log_call() {
+  if [ -n "${MOCK_COLAB_LOG:-}" ]; then
+    printf '%s\n' "$*" >> "$MOCK_COLAB_LOG"
+  fi
+}
+
+fail() { echo "mock colab: error: $1" >&2; exit 1; }
+
+# Strip global flags (--auth X, --config X, --logtostderr, -c X) to find subcommand.
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --auth|--config|-c) shift 2 ;;
+    --logtostderr) shift ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- "${args[@]:-}"
+
+log_call "$@"
+
+if [ "${MOCK_COLAB_AUTH:-1}" = "0" ]; then
+  echo "To authorize colab-cli, visit this URL in any browser:" >&2
+  echo "Enter the authorization code:" >&2
+  echo "Aborted." >&2
+  exit 1
+fi
+
+sub="${1:-}"; shift || true
+failvar="MOCK_COLAB_FAIL_$(printf '%s' "$sub" | tr 'a-z-' 'A-Z_')"
+if [ "${!failvar:-0}" = "1" ]; then
+  fail "$sub failed (mock-programmed failure)"
+fi
+
+session_of() {
+  # session_of <args...>: value after -s/--session, if any.
+  local prev=""
+  for a in "$@"; do
+    if [ "$prev" = "-s" ] || [ "$prev" = "--session" ]; then printf '%s' "$a"; return 0; fi
+    prev="$a"
+  done
+  return 1
+}
+
+case "$sub" in
+  sessions)
+    for s in $(session_list); do echo "[$s] mock-endpoint | Hardware: CPU | Shape: CPU | Variant: DEFAULT"; done
+    ;;
+  status)
+    s="$(session_of "$@" || true)"
+    case " $(session_list) " in
+      *" $s "*) echo "session: $s"; echo "hardware: ${MOCK_COLAB_GPU:-cpu}"; echo "state: IDLE" ;;
+      *) fail "session not found: $s" ;;
+    esac
+    ;;
+  new)
+    s="$(session_of "$@" || true)"
+    if [ -n "${MOCK_COLAB_SESSIONS_FILE:-}" ]; then
+      printf '%s\n' "$s" >> "$MOCK_COLAB_SESSIONS_FILE"
+    fi
+    echo "created session: $s"
+    ;;
+  stop)
+    s="$(session_of "$@" || true)"
+    if [ -n "${MOCK_COLAB_SESSIONS_FILE:-}" ] && [ -f "$MOCK_COLAB_SESSIONS_FILE" ]; then
+      grep -vx "$s" "$MOCK_COLAB_SESSIONS_FILE" > "$MOCK_COLAB_SESSIONS_FILE.tmp" || true
+      mv "$MOCK_COLAB_SESSIONS_FILE.tmp" "$MOCK_COLAB_SESSIONS_FILE"
+    fi
+    echo "stopped."
+    ;;
+  usage)
+    echo "balance: 42.0 compute units"
+    ;;
+  upload)
+    # upload [-s S] LOCAL REMOTE
+    local_file=""; remote_file=""; prev=""
+    for a in "$@"; do
+      case "$a" in
+        -s|--session) prev="skipnext"; continue ;;
+      esac
+      if [ "$prev" = "skipnext" ]; then prev=""; continue; fi
+      if [ -z "$local_file" ]; then local_file="$a"; else remote_file="$a"; fi
+    done
+    [ -f "$local_file" ] || fail "local file not found: $local_file"
+    if [ -n "${MOCK_COLAB_STAGEDIR:-}" ]; then
+      cp "$local_file" "$MOCK_COLAB_STAGEDIR/$(basename "$local_file")"
+    fi
+    echo "uploaded $local_file -> $remote_file"
+    ;;
+  download)
+    # download [-s S] REMOTE LOCAL
+    remote_file=""; local_file=""; prev=""
+    for a in "$@"; do
+      case "$a" in
+        -s|--session) prev="skipnext"; continue ;;
+      esac
+      if [ "$prev" = "skipnext" ]; then prev=""; continue; fi
+      if [ -z "$remote_file" ]; then remote_file="$a"; else local_file="$a"; fi
+    done
+    case "$local_file" in
+      *.tar.gz)
+        # Real tarball so recursive-download listing/verify paths are honest.
+        tmpd="$(mktemp -d "${TMPDIR:-/tmp}/mock-dl.XXXXXX")"
+        printf 'mock-remote-content\n' > "$tmpd/file.txt"
+        tar -czf "$local_file" -C "$tmpd" file.txt
+        rm -rf "$tmpd"
+        ;;
+      *)
+        printf 'mock-bytes-for:%s\n' "$remote_file" > "$local_file"
+        ;;
+    esac
+    echo "downloaded $remote_file -> $local_file"
+    ;;
+  exec)
+    # exec [-s S] -f FILE [--timeout N] [--env K=V]: fake execution.
+    file=""; prev=""
+    for a in "$@"; do
+      if [ "$prev" = "-f" ] || [ "$prev" = "--file" ]; then file="$a"; prev=""; continue; fi
+      prev="$a"
+    done
+    if [ -z "$file" ]; then cat >/dev/null; echo "(stdin executed)"; exit 0; fi
+    [ -f "$file" ] || fail "file not found: $file"
+    echo "executing $file ..."
+    case "$file" in
+      *.ipynb)
+        out="${file%.ipynb}_output.ipynb"
+        cp "$file" "$out"
+        echo "wrote $out"
+        ;;
+    esac
+    ;;
+  log)
+    # log [-s S] [-n N] [-t T] [-o FILE]
+    outfile=""; prev=""
+    for a in "$@"; do
+      if [ "$prev" = "-o" ] || [ "$prev" = "--output" ]; then outfile="$a"; prev=""; continue; fi
+      prev="$a"
+    done
+    if [ -n "$outfile" ]; then
+      printf '{"mock":"log","session":"%s"}\n' "$(session_of "$@" || true)" > "$outfile"
+    fi
+    echo "(mock log output)"
+    ;;
+  ls)
+    echo "notebooks/"
+    echo "services/"
+    ;;
+  rm)
+    echo "removed."
+    ;;
+  console)
+    echo "(mock console; stdin follows:)"
+    cat
+    ;;
+  ssh)
+    echo "(mock ssh shell; not interactive in tests)"
+    ;;
+  *)
+    fail "unknown mock subcommand: $sub"
+    ;;
+esac
