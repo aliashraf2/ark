@@ -44,6 +44,29 @@ export class RigidBodyFactory {
     return body
   }
 
+  /**
+   * Lightweight box for wind demonstration: 0.5 m side, 2.5 kg. Large
+   * sail-area-to-mass ratio so wind forces are clearly visible.
+   */
+  public static createWindTestBox(world: RAPIER.World, position: Vector3): RAPIER.RigidBody {
+    const body = world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(position.x, position.y, position.z)
+        .setLinearDamping(0)
+        .setAngularDamping(0.1)
+        .setCanSleep(true),
+    )
+
+    const boxCollider = RAPIER.ColliderDesc.cuboid(0.25, 0.25, 0.25)
+      .setDensity(20)
+      .setRestitution(0.3)
+      .setFriction(0.6)
+
+    world.createCollider(boxCollider, body)
+
+    return body
+  }
+
   public static resetBodyTranslation(body: RAPIER.RigidBody, position: Vector3): void {
     body.setTranslation({ x: position.x, y: position.y, z: position.z }, true)
     body.setLinvel({ x: 0, y: 0, z: 0 }, true)

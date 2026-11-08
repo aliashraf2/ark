@@ -1,0 +1,18 @@
+# Secrets — never commit real keys.
+.env
+*.env
+!.env.example
+**/.env
+!**/.env.example
+
+# ARK agent runtime state (planner transcripts, approved capabilities cache).
+services/agent/data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Node / build
+node_modules/
+dist/

@@ -27,6 +27,31 @@ export class CameraController {
     this.controls.update()
   }
 
+  public focusTarget(target: Vector3, distance: number = 8): void {
+    const currentPos = this.controls.object.position
+    const dx = currentPos.x - this.controls.target.x
+    const dy = currentPos.y - this.controls.target.y
+    const dz = currentPos.z - this.controls.target.z
+    const len = Math.hypot(dx, dy, dz) || 1
+    const nx = dx / len
+    const ny = Math.max(dy / len, 0.25)
+    const nz = dz / len
+
+    this.controls.target.set(target.x, target.y, target.z)
+    this.controls.object.position.set(
+      target.x + nx * distance,
+      target.y + ny * distance,
+      target.z + nz * distance,
+    )
+    this.controls.update()
+  }
+
+  public setTopDown(target: Vector3, height: number = 45): void {
+    this.controls.target.set(target.x, target.y, target.z)
+    this.controls.object.position.set(target.x, target.y + height, target.z + 0.1)
+    this.controls.update()
+  }
+
   public setLimits(minDistance: number, maxDistance: number, maxPolarAngle: number): void {
     this.controls.minDistance = minDistance
     this.controls.maxDistance = maxDistance

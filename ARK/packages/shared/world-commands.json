@@ -1,0 +1,171 @@
+{
+  "protocol": "ark.world-commands",
+  "version": "4.0.0",
+  "description": "Canonical ARK Milestone 4 world command protocol. Single source of truth shared by the TypeScript simulator and the Python mission-control backend. All units SI unless noted.",
+  "planets": {
+    "earth": {
+      "gravity": 9.80665,
+      "solarConstantWm2": 1361,
+      "temperatureMinK": 230,
+      "temperatureMaxK": 320,
+      "airDensity": 1.225
+    },
+    "mars": {
+      "gravity": 3.71,
+      "solarConstantWm2": 586,
+      "temperatureMinK": 150,
+      "temperatureMaxK": 300,
+      "airDensity": 0.02
+    }
+  },
+  "commands": {
+    "get_world_state": {
+      "description": "Read the current planet, simulation time, environment state, and test-body telemetry. Read-only.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": false,
+      "reversible": true,
+      "params": {}
+    },
+    "list_capabilities": {
+      "description": "List registered world capabilities (built-in and approved synthesized) with schemas.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": false,
+      "reversible": true,
+      "params": {}
+    },
+    "switch_planet": {
+      "description": "Switch the active world between Earth and Mars. Resets environment and respawns test bodies.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": true,
+      "reversible": true,
+      "params": {
+        "planet": { "type": "enum", "values": ["earth", "mars"], "required": true }
+      }
+    },
+    "set_gravity": {
+      "description": "Set gravitational acceleration magnitude. Values far from the planetary default are labeled experimental overrides, not realistic physics.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": false,
+      "confirmWhenExtreme": true,
+      "reversible": true,
+      "params": {
+        "magnitude_mps2": { "type": "number", "unit": "m/s^2", "min": 0.1, "max": 30, "required": true }
+      }
+    },
+    "set_wind": {
+      "description": "Set manual wind by speed and meteorological compass direction (degrees clockwise from north, direction FROM which wind blows).",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": false,
+      "reversible": true,
+      "params": {
+        "speed_mps": { "type": "number", "unit": "m/s", "min": 0, "max": 60, "required": true },
+        "direction_from_deg": { "type": "number", "unit": "deg", "min": 0, "max": 360, "required": true }
+      }
+    },
+    "set_temperature": {
+      "description": "Set ambient temperature. Display/state only in Milestone 4; no rigid-body coupling claimed.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": false,
+      "reversible": true,
+      "params": {
+        "celsius": { "type": "number", "unit": "degC", "range": "planet_temperature", "required": true }
+      }
+    },
+    "set_surface_traction": {
+      "description": "Set the manual surface traction multiplier applied on top of wetness effects.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": false,
+      "reversible": true,
+      "params": {
+        "multiplier": { "type": "number", "min": 0.2, "max": 1.5, "required": true }
+      }
+    },
+    "start_weather_event": {
+      "description": "Start a scheduled weather event (rain, wind gust, dust storm, temperature shift, cloud). Rain/cloud are Earth-only; dust storms are Mars-only.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": false,
+      "reversible": true,
+      "params": {
+        "type": { "type": "enum", "values": ["rain", "wind", "dust-storm", "temperature", "cloud"], "required": true },
+        "targets": { "type": "event_targets", "required": true },
+        "delay": { "type": "number", "unit": "s", "min": 0, "max": 3600, "required": false, "default": 0 },
+        "rampUp": { "type": "number", "unit": "s", "min": 0, "max": 3600, "required": false, "default": 5 },
+        "hold": { "type": "number", "unit": "s", "min": 0, "max": 7200, "required": false, "default": 30 },
+        "rampDown": { "type": "number", "unit": "s", "min": 0, "max": 3600, "required": false, "default": 5 },
+        "priority": { "type": "number", "min": 1, "max": 10, "required": false, "default": 1 }
+      }
+    },
+    "stop_weather_event": {
+      "description": "Cancel a running weather event by id.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": false,
+      "reversible": false,
+      "params": {
+        "id": { "type": "string", "required": true }
+      }
+    },
+    "set_solar_illumination": {
+      "description": "Set a manual solar multiplier (experimental shade) composed with cloud/dust attenuation. 1 = unmodified.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": false,
+      "reversible": true,
+      "params": {
+        "multiplier": { "type": "number", "min": 0, "max": 1, "required": true }
+      }
+    },
+    "regenerate_terrain": {
+      "description": "Regenerate terrain from a seed. Omitting the seed picks a fresh random one. Same seed reproduces the same terrain.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": true,
+      "reversible": true,
+      "params": {
+        "seed": { "type": "integer", "min": 0, "max": 2147483647, "required": false }
+      }
+    },
+    "pause_simulation": {
+      "description": "Pause physics stepping and event progression. Rendering continues.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": false,
+      "reversible": true,
+      "params": {}
+    },
+    "resume_simulation": {
+      "description": "Resume physics stepping and event progression.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": false,
+      "reversible": true,
+      "params": {}
+    },
+    "reset_environment": {
+      "description": "Clear all events and restore planet base conditions. Overwrites active schedules.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": true,
+      "reversible": false,
+      "params": {}
+    },
+    "apply_scenario": {
+      "description": "Apply a predefined scenario preset (manual settings plus scheduled events). Switches planet first if the scenario belongs to the other world.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": true,
+      "reversible": false,
+      "params": {
+        "scenario_id": { "type": "string", "required": true }
+      }
+    }
+  },
+  "eventTargets": {
+    "description": "Target channels for start_weather_event. At least one required; all optional individually.",
+    "wind": { "type": "vector3", "unit": "m/s" },
+    "precipitation": { "type": "number", "unit": "mm/h", "min": 0, "max": 100 },
+    "dustTau": { "type": "number", "min": 0, "max": 5 },
+    "temperature": { "type": "number", "unit": "K", "range": "planet_temperature_kelvin" },
+    "cloudOpacity": { "type": "number", "min": 0, "max": 1 }
+  },
+  "eventTypePlanets": {
+    "rain": ["earth"],
+    "cloud": ["earth"],
+    "dust-storm": ["mars"],
+    "wind": ["earth", "mars"],
+    "temperature": ["earth", "mars"]
+  }
+}

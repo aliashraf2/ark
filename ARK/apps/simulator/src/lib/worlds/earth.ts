@@ -8,6 +8,8 @@ export const EARTH_CONFIG: PlanetConfig = definePlanet({
   id: 'earth',
   displayName: 'Earth',
   gravity: 9.80665,
+  solarConstantWm2: 1361,
+  temperature: { baseline: 288.15, min: 230, max: 320 },
   atmosphere: {
     density: 1.225,
     pressure: 101325,

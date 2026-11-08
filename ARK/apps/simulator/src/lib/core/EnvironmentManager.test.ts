@@ -166,7 +166,7 @@ describe('Test F: planet switching', () => {
       terrainWidth: 200,
       terrainDepth: 200,
       subdivisions: 160,
-      simVersion: 'ark-m2-1',
+      simVersion: 'ark-m3-1',
     })
     expect(info.gravity).toBeCloseTo(3.71, 2)
     expect(info.atmospherePressure).toBe(600)

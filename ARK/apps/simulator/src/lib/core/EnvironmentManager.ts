@@ -15,7 +15,7 @@ import {
 import type { Vector3 } from '../types/SimulationTypes'
 
 /** Simulation build tag recorded with every generated world. */
-export const SIM_VERSION = 'ark-m2-1'
+export const SIM_VERSION = 'ark-m3-1'
 
 /** Spawn clearance above the local terrain surface in meters. */
 export const SPAWN_CLEARANCE = 6

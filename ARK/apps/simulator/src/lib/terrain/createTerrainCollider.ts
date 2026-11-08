@@ -21,16 +21,21 @@ export interface TerrainColliderOptions {
  * the honest fallback: it removes triangulation ambiguity entirely rather than
  * papering over a broken binding. Revisit if the dependency is upgraded.
  */
+export interface TerrainBody {
+  body: RAPIER.RigidBody
+  collider: RAPIER.Collider
+}
+
 export function createTerrainBody(
   world: RAPIER.World,
   heightfield: Heightfield,
   options: TerrainColliderOptions,
-): RAPIER.RigidBody {
+): TerrainBody {
   const { positions, indices } = buildTerrainMeshData(heightfield)
   const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0))
-  const collider = RAPIER.ColliderDesc.trimesh(positions, indices)
+  const colliderDesc = RAPIER.ColliderDesc.trimesh(positions, indices)
     .setFriction(options.friction)
     .setRestitution(options.restitution)
-  world.createCollider(collider, body)
-  return body
+  const collider = world.createCollider(colliderDesc, body)
+  return { body, collider }
 }

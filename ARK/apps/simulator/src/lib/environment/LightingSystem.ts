@@ -14,6 +14,11 @@ export class LightingSystem {
   public readonly sun: THREE.DirectionalLight
   public readonly hemisphere: THREE.HemisphereLight
 
+  private baseSunIntensity = 1
+  private baseHemiIntensity = 1
+  private baseFogNear = 90
+  private baseFogFar = 420
+
   constructor() {
     this.hemisphere = new THREE.HemisphereLight(0xffffff, 0x000000, 1)
     this.sun = new THREE.DirectionalLight(0xffffff, 1)
@@ -54,5 +59,28 @@ export class LightingSystem {
 
     scene.background = new THREE.Color(light.background)
     scene.fog = new THREE.Fog(light.fogColor, light.fogNear, light.fogFar)
+
+    this.baseSunIntensity = light.sunIntensity
+    this.baseHemiIntensity = light.hemiIntensity
+    this.baseFogNear = light.fogNear
+    this.baseFogFar = light.fogFar
+  }
+
+  /**
+   * Applies dynamic atmosphere: scales sunlight by the solar multiplier and
+   * closes fog to the visibility distance. Called at render rate; cheap.
+   */
+  public applySolar(scene: THREE.Scene, solarMultiplier: number, visibilityMeters: number): void {
+    const multiplier = Math.min(Math.max(solarMultiplier, 0), 1)
+    this.sun.intensity = this.baseSunIntensity * multiplier
+    // Skylight persists under haze: it dims less than direct sun.
+    this.hemisphere.intensity = this.baseHemiIntensity * (0.35 + 0.65 * multiplier)
+
+    const fog = scene.fog
+    if (fog instanceof THREE.Fog) {
+      const visibility = Math.max(visibilityMeters, 10)
+      fog.near = Math.min(this.baseFogNear, visibility * 0.25)
+      fog.far = Math.min(this.baseFogFar, visibility)
+    }
   }
 }

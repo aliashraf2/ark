@@ -8,6 +8,8 @@ export const MARS_CONFIG: PlanetConfig = definePlanet({
   id: 'mars',
   displayName: 'Mars',
   gravity: 3.71,
+  solarConstantWm2: 586,
+  temperature: { baseline: 213.15, min: 150, max: 300 },
   atmosphere: {
     density: 0.02,
     pressure: 600,

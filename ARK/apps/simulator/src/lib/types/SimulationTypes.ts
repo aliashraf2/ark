@@ -32,14 +32,18 @@ export const FIXED_TIME_STEP = 1 / 60
 export const MAX_FRAME_DELTA = 0.25
 
 /**
- * Demonstration material parameters for Milestone 1 (not experimentally measured).
+ * Demonstration material parameters (not experimentally measured).
  * One world unit represents one meter; the ground surface sits at Y = 0.
+ *
+ * Sphere density 30 kg/m^3 (15.7 kg shell): heavy enough to fall nearly
+ * ballistically in still air, light enough for strong wind to visibly push it.
+ * Gravity-driven tests are mass-independent, so this does not affect them.
  */
 export const DEFAULT_PHYSICS_CONFIG: PhysicsConfig = {
   gravity: { x: 0, y: -9.81, z: 0 },
   groundHeight: 0,
   sphereRadius: 0.5,
-  sphereDensity: 1,
+  sphereDensity: 30,
   sphereInitialPosition: { x: 0, y: 5, z: 0 },
   sphereRestitution: 0.35,
   groundRestitution: 0.35,
@@ -51,8 +55,11 @@ export interface TelemetryState {
   time: number
   position: Vector3
   velocityY: number
+  velocity?: Vector3
   gravity: Vector3
   status: SimulationStatus
   /** Surface material under the sphere, e.g. "Regolith". */
   surface: string
+  /** Latest environment snapshot for the control panel (set by the engine). */
+  environment: import('./EnvironmentTypes').EnvironmentSnapshot | null
 }

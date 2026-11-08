@@ -86,11 +86,22 @@ export interface CameraParams {
   maxPolarAngle: number
 }
 
+export interface TemperatureParams {
+  /** Baseline ambient temperature in Kelvin. */
+  baseline: number
+  /** Allowed manual/event temperature range in Kelvin. */
+  min: number
+  max: number
+}
+
 export interface PlanetConfig {
   id: PlanetId
   displayName: string
   /** Gravitational acceleration magnitude in m/s^2. */
   gravity: number
+  /** Top-of-atmosphere solar irradiance in W/m^2. */
+  solarConstantWm2: number
+  temperature: TemperatureParams
   atmosphere: AtmosphereParams
   terrain: TerrainGenParams
   surfaceRules: SurfaceRule[]
@@ -130,6 +141,13 @@ export function validatePlanetConfig(config: PlanetConfig): string[] {
   const t = config.terrain
 
   if (!(config.gravity > 0)) errors.push('gravity must be positive')
+  if (!(config.solarConstantWm2 > 0)) errors.push('solar constant must be positive')
+  if (
+    !(config.temperature.min < config.temperature.baseline) ||
+    !(config.temperature.baseline < config.temperature.max)
+  ) {
+    errors.push('temperature baseline must lie strictly inside [min, max]')
+  }
   if (!(config.atmosphere.density >= 0)) errors.push('atmospheric density must be non-negative')
   if (!(config.atmosphere.pressure >= 0)) errors.push('atmospheric pressure must be non-negative')
   if (!(t.width > 0)) errors.push('terrain width must be positive')

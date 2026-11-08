@@ -1,7 +1,10 @@
 import * as THREE from 'three'
 
 import { LightingSystem } from '../environment/LightingSystem'
+import { WeatherRenderer, type WeatherQuality } from '../environment/WeatherRenderer'
 import { Sphere } from '../objects/Sphere'
+import { TestBox } from '../objects/TestBox'
+import type { EnvironmentState } from '../types/EnvironmentTypes'
 import type { Quaternion, Vector3 } from '../types/SimulationTypes'
 import { DEFAULT_PHYSICS_CONFIG } from '../types/SimulationTypes'
 import type { PlanetConfig } from '../worlds/PlanetConfig'
@@ -11,7 +14,9 @@ export class SceneManager {
   public readonly camera: THREE.PerspectiveCamera
   public readonly renderer: THREE.WebGLRenderer
   public readonly sphere: Sphere
+  public readonly testBox: TestBox
   public readonly lighting = new LightingSystem()
+  public readonly weather: WeatherRenderer
 
   private readonly terrainMaterial = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -43,6 +48,11 @@ export class SceneManager {
     this.sphere = new Sphere(DEFAULT_PHYSICS_CONFIG.sphereRadius)
     this.scene.add(this.sphere.mesh)
 
+    this.testBox = new TestBox()
+    this.scene.add(this.testBox.mesh)
+
+    this.weather = new WeatherRenderer(this.scene)
+
     this.axesHelper.position.set(0, 0.01, 0)
     this.axesHelper.visible = false
     this.scene.add(this.axesHelper)
@@ -68,6 +78,23 @@ export class SceneManager {
     if (rotation) {
       this.sphere.setRotation(rotation)
     }
+  }
+
+  public syncBox(position: Vector3, rotation?: Quaternion): void {
+    this.testBox.setPosition(position)
+    if (rotation) {
+      this.testBox.setRotation(rotation)
+    }
+  }
+
+  /** Applies dynamic atmosphere + weather visuals at render rate. */
+  public syncEnvironment(wallDt: number, env: EnvironmentState, viewCenter: Vector3): void {
+    this.lighting.applySolar(this.scene, env.solarMultiplier, env.visibility)
+    this.weather.update(wallDt, env, viewCenter)
+  }
+
+  public setWeatherQuality(quality: WeatherQuality): void {
+    this.weather.setQuality(quality)
   }
 
   /**
@@ -107,6 +134,8 @@ export class SceneManager {
     }
     this.terrainMaterial.dispose()
     this.sphere.dispose()
+    this.testBox.dispose()
+    this.weather.dispose()
     this.axesHelper.dispose()
     this.renderer.dispose()
 
