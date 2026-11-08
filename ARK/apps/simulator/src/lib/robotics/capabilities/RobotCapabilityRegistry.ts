@@ -1,5 +1,5 @@
-export type RobotRole = 'explorer' | 'carrier' | 'support'
-export type CapabilityId = 'navigate' | 'observe_terrain' | 'detect_obstacles' | 'transport_payload' | 'assist_recovery' | 'tow'
+export type RobotRole = 'explorer' | 'carrier' | 'support' | 'builder'
+export type CapabilityId = 'navigate' | 'observe_terrain' | 'detect_obstacles' | 'transport_payload' | 'assist_recovery' | 'tow' | 'construct_habitat'
 
 export interface RobotCapability {
   id: CapabilityId
@@ -19,6 +19,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<RobotRole, readonly CapabilityId
   explorer: ['navigate', 'observe_terrain', 'detect_obstacles'],
   carrier: ['navigate', 'transport_payload'],
   support: ['navigate', 'assist_recovery', 'tow'],
+  builder: ['navigate', 'observe_terrain', 'construct_habitat'],
 })
 
 export class RobotCapabilityRegistry {

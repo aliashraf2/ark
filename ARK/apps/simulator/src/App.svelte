@@ -34,7 +34,7 @@
   let showHud = true
   let showShortcuts = false
   let activeTab: 'world' | 'weather' | 'scenarios' | 'robot' | 'mission' = 'world'
-  let activeCameraMode: 'orbit' | 'sphere' | 'box' | 'topdown' = 'orbit'
+  let activeCameraMode: 'orbit' | 'topdown' = 'orbit'
   let toastMessage: string | null = null
   let toastTimer: number | null = null
 
@@ -70,6 +70,13 @@
   let missionTargetZ = 10
   let followRoverEnabled = false
   let roverRaysVisible = false
+  type HomeUnit = 'explorer' | 'builder' | 'support' | 'drone'
+  let homeInventory: Record<HomeUnit, number> = { explorer: 2, builder: 1, support: 1, drone: 2 }
+  let missionInstruction = ''
+  let missionResult = ''
+  let droneIds: string[] = []
+  let builderMissions: Record<string, { x: number; z: number; missionId: string }> = {}
+  let builtHabitats: string[] = []
 
   let telemetry: TelemetryState = {
     time: 0,
@@ -159,11 +166,6 @@
     showToast('Simulation reset to origin')
   }
 
-  function dropSimulation(): void {
-    engine?.drop()
-    showToast('Robot dropped from spawn altitude')
-  }
-
   function handleDebugToggle(): void {
     debugMode = !debugMode
     engine?.setDebugMode(debugMode)
@@ -175,15 +177,9 @@
     showToast(`Particle effects: ${weatherQuality.toUpperCase()}`)
   }
 
-  function setCameraMode(mode: 'orbit' | 'sphere' | 'box' | 'topdown'): void {
+  function setCameraMode(mode: 'orbit' | 'topdown'): void {
     activeCameraMode = mode
-    if (mode === 'sphere') {
-      engine?.focusSphere()
-      showToast('Camera: Tracking Robot')
-    } else if (mode === 'box') {
-      engine?.focusBox()
-      showToast('Camera: Tracking Wind Rig')
-    } else if (mode === 'topdown') {
+    if (mode === 'topdown') {
       engine?.setTopDownView()
       showToast('Camera: Satellite Top-Down')
     } else {
@@ -404,6 +400,98 @@
       .map((id) => engine?.robots.snapshot(id) ?? null)
       .filter((snapshot): snapshot is RoverSnapshot => snapshot !== null)
     rescueSnapshot = engine.cooperation.snapshot()
+    droneIds = engine.drones.ids()
+    for (const [id, target] of Object.entries(builderMissions)) {
+      const mission = engine.robots.missions.get(target.missionId)
+      if (mission?.status === 'succeeded') {
+        const habitatId = engine.buildHabitat(target.x, target.z)
+        builtHabitats = [...builtHabitats, habitatId]
+        delete builderMissions[id]
+        missionResult = `${id} reached the site and constructed ${habitatId}.`
+      } else if (mission?.status === 'failed') {
+        delete builderMissions[id]
+        missionResult = `${id} could not reach the build site (${mission.failReason ?? 'mission failed'}).`
+      }
+    }
+  }
+
+  function homeDeploy(kind: HomeUnit): string | null {
+    if (!engine || homeInventory[kind] <= 0) return null
+    const offset = ROVER_SPAWN_OFFSETS[roverIds.length % ROVER_SPAWN_OFFSETS.length] ?? { x: 6, z: 0 }
+    if (kind === 'drone') {
+      const id = engine.deployDrone(offset.x, offset.z)
+      homeInventory = { ...homeInventory, drone: homeInventory.drone - 1 }
+      droneIds = engine.drones.ids()
+      return id
+    }
+    const id = engine.spawnRover(offset.x, offset.z)
+    engine.cooperation.capabilities.register(id, kind)
+    homeInventory = { ...homeInventory, [kind]: homeInventory[kind] - 1 }
+    roverModes[id] = 'manual'
+    selectedRover = id
+    refreshRovers()
+    return id
+  }
+
+  function storeSelectedRover(): void {
+    if (!engine || !selectedRover) return
+    const id = selectedRover
+    const role = engine.cooperation.capabilities.get(id)?.role ?? 'explorer'
+    if (role === 'builder' || role === 'support' || role === 'explorer') {
+      homeInventory = { ...homeInventory, [role]: homeInventory[role] + 1 }
+    }
+    if (followRoverEnabled && engine.followRover === id) { followRoverEnabled = false; engine.setFollowRover(null) }
+    engine.cooperation.capabilities.remove(id)
+    engine.removeRover(id)
+    delete roverModes[id]
+    selectedRover = null
+    refreshRovers()
+    showToast(`${id} returned to robot home`)
+  }
+
+  function recallDrones(): void {
+    if (!engine || droneIds.length === 0) return
+    const returning = [...droneIds]
+    for (const id of returning) engine.drones.remove(id)
+    homeInventory = { ...homeInventory, drone: homeInventory.drone + returning.length }
+    droneIds = engine.drones.ids()
+    showToast(`${returning.length} drone${returning.length === 1 ? '' : 's'} returned to robot home`)
+  }
+
+  function dispatchMission(): void {
+    if (!engine || !envInfo) return
+    const text = missionInstruction.trim().toLowerCase()
+    if (!text) { missionResult = 'Enter an objective such as “build a habitat at 12, 8” or “send a drone to scout 15, -4”.'; return }
+    const coords = [...text.matchAll(/(-?\d+(?:\.\d+)?)/g)].map((match) => Number(match[1]))
+    const x = coords.length > 0 ? coords[coords.length - 2] ?? coords[0] ?? 0 : 12
+    const z = coords.length > 1 ? coords[coords.length - 1] ?? 8 : 8
+    const half = envInfo.terrainWidth / 2 - 5
+    const target = { x: Math.max(-half, Math.min(half, x)), z: Math.max(-half, Math.min(half, z)) }
+    if (text.includes('drone') || text.includes('scout')) {
+      const id = droneIds[0] ?? homeDeploy('drone')
+      if (!id) { missionResult = 'No drone is available at home.'; return }
+      engine.drones.command(id, target.x, target.z)
+      missionResult = `${id} launched from home and is flying to scout (${target.x}, ${target.z}).`
+      return
+    }
+    const build = text.includes('build') || text.includes('house') || text.includes('habitat')
+    const id = build
+      ? roverIds.find((candidate) => engine?.cooperation.capabilities.get(candidate)?.role === 'builder') ?? homeDeploy('builder')
+      : selectedRover ?? roverIds[0] ?? homeDeploy('explorer')
+    if (!id) { missionResult = `No ${build ? 'builder' : 'rover'} is available at home.`; return }
+    const rover = engine.robots.get(id)
+    if (!rover) return
+    const active = engine.robots.missions.missionForRover(id)
+    if (active) engine.robots.missions.abort(active.id)
+    const mission = engine.robots.missions.create(id, rover.position, { x: target.x, y: 0, z: target.z }, 2, 240)
+    engine.robots.missions.start(mission.id)
+    engine.robots.setController(id, new NavigationController())
+    roverModes[id] = 'navigation'
+    selectedRover = id
+    roverControlMode = 'navigation'
+    if (build) builderMissions[id] = { ...target, missionId: mission.id }
+    missionResult = `${id} assigned to ${build ? 'construct a habitat' : 'navigate'} at (${target.x}, ${target.z}).`
+    refreshRovers()
   }
 
   function startMarsRescueDemo(): void {
@@ -439,11 +527,7 @@
     if (followRoverEnabled && engine.followRover === id) {
       followRoverEnabled = false
     }
-    engine.removeRover(id)
-    delete roverModes[id]
-    selectedRover = null
-    refreshRovers()
-    showToast(`Rover ${id} removed`)
+    storeSelectedRover()
   }
 
   function selectRover(id: string): void {
@@ -590,8 +674,6 @@
       togglePause()
     } else if (event.key === 'r' || event.key === 'R') {
       resetSimulation()
-    } else if (event.key === 'd' || event.key === 'D') {
-      dropSimulation()
     } else if (event.key === '1') {
       selectPlanet('earth')
     } else if (event.key === '2') {
@@ -601,7 +683,7 @@
     } else if (event.key === 'm' || event.key === 'M') {
       dockOpen = !dockOpen
     } else if (event.key === 'c' || event.key === 'C') {
-      setCameraMode('sphere')
+      if (selectedRover) engine?.focusRover(selectedRover)
     } else if (event.key === 'f' || event.key === 'F') {
       toggleFullscreen()
     } else if (event.key === '?') {
@@ -785,19 +867,6 @@
 
       <button
         type="button"
-        class="action-btn"
-        on:click={dropSimulation}
-        disabled={controlsDisabled}
-        title="Drop robot from spawn [D]"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 2v14M19 9l-7 7-7-7M5 20h14" />
-        </svg>
-        <span>Drop Robot</span>
-      </button>
-
-      <button
-        type="button"
         class="action-btn icon-only"
         on:click={() => (showShortcuts = true)}
         title="Keybindings [?]"
@@ -867,36 +936,6 @@
         <path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0" />
       </svg>
       <span>Orbit</span>
-    </button>
-
-    <button
-      type="button"
-      class="cam-tool-btn"
-      class:active={activeCameraMode === 'sphere'}
-      on:click={() => setCameraMode('sphere')}
-      title="Focus and track robot payload [C]"
-    >
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="8" />
-        <line x1="12" y1="2" x2="12" y2="4" />
-        <line x1="12" y1="20" x2="12" y2="22" />
-        <line x1="2" y1="12" x2="4" y2="12" />
-        <line x1="20" y1="12" x2="22" y2="12" />
-      </svg>
-      <span>Robot</span>
-    </button>
-
-    <button
-      type="button"
-      class="cam-tool-btn"
-      class:active={activeCameraMode === 'box'}
-      on:click={() => setCameraMode('box')}
-      title="Focus wind aerodynamic test rig"
-    >
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-      </svg>
-      <span>Wind Rig</span>
     </button>
 
     <button
@@ -1095,7 +1134,7 @@
           <circle cx="12" cy="5" r="2" />
           <path d="M12 7v4M8 15h.01M16 15h.01" />
         </svg>
-        <span class="tab-title">Payload</span>
+        <span class="tab-title">Fleet & Home</span>
       </button>
 
       <button
@@ -1489,7 +1528,38 @@
         </div>
       </div>
       <div class="dock-tab-pane" class:hidden={activeTab !== 'robot'} role="tabpanel">
-        <!-- Rover Fleet (Milestone 5) -->
+        <div class="dock-section">
+          <div class="section-title-row"><h3 class="section-title">Robot Home</h3><span class="section-badge">BASE · DEPLOYMENT</span></div>
+          <p class="mission-hint">Equipment stored here is deployed into the live physics world when assigned to a mission.</p>
+          <div class="hud-metric-grid">
+            <div class="hud-metric-item"><span class="hud-metric-label">Explorer rovers</span><span class="hud-metric-val">{homeInventory.explorer} stored</span></div>
+            <div class="hud-metric-item"><span class="hud-metric-label">Builder rovers</span><span class="hud-metric-val">{homeInventory.builder} stored</span></div>
+            <div class="hud-metric-item"><span class="hud-metric-label">Support rovers</span><span class="hud-metric-val">{homeInventory.support} stored</span></div>
+            <div class="hud-metric-item"><span class="hud-metric-label">Scout drones</span><span class="hud-metric-val">{homeInventory.drone} stored</span></div>
+          </div>
+          <div class="event-triggers-grid">
+            <button type="button" class="event-trigger-btn" on:click={() => homeDeploy('explorer')} disabled={controlsDisabled || homeInventory.explorer === 0}><span>Deploy Explorer</span></button>
+            <button type="button" class="event-trigger-btn" on:click={() => homeDeploy('builder')} disabled={controlsDisabled || homeInventory.builder === 0}><span>Deploy Builder</span></button>
+            <button type="button" class="event-trigger-btn" on:click={() => homeDeploy('support')} disabled={controlsDisabled || homeInventory.support === 0}><span>Deploy Support</span></button>
+            <button type="button" class="event-trigger-btn" on:click={() => homeDeploy('drone')} disabled={controlsDisabled || homeInventory.drone === 0}><span>Deploy Scout Drone</span></button>
+          </div>
+        </div>
+
+        <div class="dock-section">
+          <div class="section-title-row"><h3 class="section-title">Mission Command</h3><span class="section-badge">CAPABILITY ROUTING</span></div>
+          <p class="mission-hint">Give the fleet an objective. Supported examples: “build a habitat at 12, 8”, “send a drone to scout 15, -4”, or “explore 10, 10”.</p>
+          <div class="control-group">
+            <label class="control-label" for="mission-instruction">Mission objective</label>
+            <input id="mission-instruction" class="ark-input" bind:value={missionInstruction} placeholder="Build a habitat at 12, 8" on:keydown={(event) => event.key === 'Enter' && dispatchMission()} />
+          </div>
+          <button type="button" class="event-trigger-btn" on:click={dispatchMission} disabled={controlsDisabled}><span>Assign Mission</span></button>
+          {#if missionResult}<p class="mission-hint" aria-live="polite">{missionResult}</p>{/if}
+          {#if builtHabitats.length}<p class="mission-hint">Built structures: {builtHabitats.join(', ')}</p>{/if}
+          {#if droneIds.length}<p class="mission-hint">Airborne drones: {droneIds.join(', ')}</p>{/if}
+          {#if droneIds.length}<button type="button" class="event-trigger-btn" on:click={recallDrones} disabled={controlsDisabled}><span>Recall Drones to Home</span></button>{/if}
+        </div>
+
+        <!-- Rover Fleet -->
         <div class="dock-section">
           <div class="section-title-row">
             <h3 class="section-title">Rover Fleet</h3>
@@ -1528,7 +1598,7 @@
               on:click={removeSelectedRover}
               disabled={controlsDisabled || !selectedRover}
             >
-              <span>Remove</span>
+              <span>Store at Home</span>
             </button>
           </div>
         </div>
@@ -1739,74 +1809,6 @@
           </div>
         {/if}
 
-        <!-- Payload Specifications -->
-        <div class="dock-section">
-          <div class="section-title-row">
-            <h3 class="section-title">Robot Payload Alpha</h3>
-            <span class="section-badge">SPHERE TESTBED</span>
-          </div>
-
-          <div class="hud-metric-grid">
-            <div class="hud-metric-item">
-              <span class="hud-metric-label">Radius</span>
-              <span class="hud-metric-val">0.50 m</span>
-            </div>
-            <div class="hud-metric-item">
-              <span class="hud-metric-label">Mass</span>
-              <span class="hud-metric-val">15.70 kg</span>
-            </div>
-            <div class="hud-metric-item">
-              <span class="hud-metric-label">Restitution</span>
-              <span class="hud-metric-val">0.35</span>
-            </div>
-            <div class="hud-metric-item">
-              <span class="hud-metric-label">Surface Friction</span>
-              <span class="hud-metric-val">0.60</span>
-            </div>
-          </div>
-
-          <div class="event-triggers-grid">
-            <button type="button" class="event-trigger-btn" on:click={dropSimulation} disabled={controlsDisabled}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 2v14M19 9l-7 7-7-7M5 20h14" />
-              </svg>
-              <span>Drop from Spawn</span>
-            </button>
-            <button type="button" class="event-trigger-btn" on:click={() => setCameraMode('sphere')}>
-              <span>Track with Camera</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="dock-section">
-          <div class="section-title-row">
-            <h3 class="section-title">Wind Test Rig Beta</h3>
-            <span class="section-badge">AERODYNAMIC RIG</span>
-          </div>
-
-          <div class="hud-metric-grid">
-            <div class="hud-metric-item">
-              <span class="hud-metric-label">Geometry</span>
-              <span class="hud-metric-val">0.5m Cube</span>
-            </div>
-            <div class="hud-metric-item">
-              <span class="hud-metric-label">Drag Coeff (Cd)</span>
-              <span class="hud-metric-val">1.05</span>
-            </div>
-            <div class="hud-metric-item">
-              <span class="hud-metric-label">Frontal Area</span>
-              <span class="hud-metric-val">0.25 m²</span>
-            </div>
-            <div class="hud-metric-item">
-              <span class="hud-metric-label">Coupled Drag</span>
-              <span class="hud-metric-val">{aeroEnabled ? 'Active' : 'Bypassed'}</span>
-            </div>
-          </div>
-
-          <button type="button" class="event-trigger-btn" on:click={() => setCameraMode('box')}>
-            <span>Focus Aerodynamic Rig</span>
-          </button>
-        </div>
       </div>
       <div class="dock-tab-pane" class:hidden={activeTab !== 'mission'} role="tabpanel">
         <MissionPanel
@@ -1858,10 +1860,6 @@
           <div class="shortcut-row">
             <span class="shortcut-desc">Reset Sim</span>
             <kbd class="key-kbd">R</kbd>
-          </div>
-          <div class="shortcut-row">
-            <span class="shortcut-desc">Drop Robot</span>
-            <kbd class="key-kbd">D</kbd>
           </div>
           <div class="shortcut-row">
             <span class="shortcut-desc">Track Robot Cam</span>

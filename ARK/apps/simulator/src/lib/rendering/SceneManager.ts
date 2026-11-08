@@ -2,19 +2,14 @@ import * as THREE from 'three'
 
 import { LightingSystem } from '../environment/LightingSystem'
 import { WeatherRenderer, type WeatherQuality } from '../environment/WeatherRenderer'
-import { Sphere } from '../objects/Sphere'
-import { TestBox } from '../objects/TestBox'
 import type { EnvironmentState } from '../../../../../packages/physics/src/types/EnvironmentTypes'
-import type { Quaternion, Vector3 } from '../../../../../packages/physics/src/types/SimulationTypes'
-import { DEFAULT_PHYSICS_CONFIG } from '../../../../../packages/physics/src/types/SimulationTypes'
+import type { Vector3 } from '../../../../../packages/physics/src/types/SimulationTypes'
 import type { PlanetConfig } from '../../../../../packages/physics/src/worlds/PlanetConfig'
 
 export class SceneManager {
   public readonly scene = new THREE.Scene()
   public readonly camera: THREE.PerspectiveCamera
   public readonly renderer: THREE.WebGLRenderer
-  public readonly sphere: Sphere
-  public readonly testBox: TestBox
   public readonly lighting = new LightingSystem()
   public readonly weather: WeatherRenderer
 
@@ -45,12 +40,6 @@ export class SceneManager {
     this.scene.fog = new THREE.Fog(0x050b14, 90, 420)
     this.lighting.attach(this.scene)
 
-    this.sphere = new Sphere(DEFAULT_PHYSICS_CONFIG.sphereRadius)
-    this.scene.add(this.sphere.mesh)
-
-    this.testBox = new TestBox()
-    this.scene.add(this.testBox.mesh)
-
     this.weather = new WeatherRenderer(this.scene)
 
     this.axesHelper.position.set(0, 0.01, 0)
@@ -71,20 +60,6 @@ export class SceneManager {
 
   public render(): void {
     this.renderer.render(this.scene, this.camera)
-  }
-
-  public syncSphere(position: Vector3, rotation?: Quaternion): void {
-    this.sphere.setPosition(position)
-    if (rotation) {
-      this.sphere.setRotation(rotation)
-    }
-  }
-
-  public syncBox(position: Vector3, rotation?: Quaternion): void {
-    this.testBox.setPosition(position)
-    if (rotation) {
-      this.testBox.setRotation(rotation)
-    }
   }
 
   /** Applies dynamic atmosphere + weather visuals at render rate. */
@@ -112,6 +87,9 @@ export class SceneManager {
     this.scene.add(this.terrainMesh)
   }
 
+  public addMissionObject(object: THREE.Object3D): void { this.scene.add(object) }
+  public removeMissionObject(object: THREE.Object3D): void { this.scene.remove(object) }
+
   public applyEnvironment(config: PlanetConfig): void {
     this.lighting.apply(config, this.scene)
   }
@@ -119,7 +97,6 @@ export class SceneManager {
   public setDebugMode(enabled: boolean): void {
     this.debugMode = enabled
     this.axesHelper.visible = enabled
-    this.sphere.mesh.material.wireframe = enabled
   }
 
   public get isDebugMode(): boolean {
@@ -133,8 +110,6 @@ export class SceneManager {
       this.terrainMesh = null
     }
     this.terrainMaterial.dispose()
-    this.sphere.dispose()
-    this.testBox.dispose()
     this.weather.dispose()
     this.axesHelper.dispose()
     this.renderer.dispose()

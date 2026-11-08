@@ -7,7 +7,6 @@ import { RoverView } from '../robotics/RoverView'
 import { resolveRoverConfig } from '../../../../../packages/physics/src/robotics/RoverConfig'
 import { downhillYaw, findSpawnSite, footprintSpawnHeight } from '../../../../../packages/physics/src/robotics/RoverDynamics'
 import { CameraController } from '../rendering/CameraController'
-import { BodySync } from '../rendering/BodySync'
 import { SceneManager } from '../rendering/SceneManager'
 import { getTerrainHeight } from '../../../../../packages/physics/src/terrain/terrainSampling'
 import type { EnvironmentSnapshot } from '../../../../../packages/physics/src/types/EnvironmentTypes'
@@ -17,11 +16,10 @@ import { getPlanet } from '../../../../../packages/physics/src/worlds/planetPres
 import { EnvironmentManager, SPAWN_CLEARANCE, type EnvironmentInfo } from './EnvironmentManager'
 import { SimulationClock } from '../../../../../packages/physics/src/core/SimulationClock'
 import { CooperativeRescueCoordinator } from '../robotics/coordination/CooperativeRescueCoordinator'
+import { DroneManager } from '../robotics/DroneManager'
+import { HabitatBuilder } from '../robotics/HabitatBuilder'
 
 export type { StartEventSpec }
-
-/** Horizontal offset of the wind-test box spawn from the sphere spawn. */
-const BOX_SPAWN_OFFSET = { x: 3.5, z: 1.5 }
 
 /**
  * Owns the frame loop: fixed-step physics via an accumulator, interpolated
@@ -37,6 +35,8 @@ export class SimulationEngine {
   public readonly envController: EnvironmentController
   public readonly robots: RobotManager
   public readonly cooperation: CooperativeRescueCoordinator
+  public readonly drones: DroneManager
+  public readonly habitats: HabitatBuilder
 
   private readonly clock = new SimulationClock()
   private readonly cameraController: CameraController
@@ -45,8 +45,6 @@ export class SimulationEngine {
   private readonly container: HTMLElement
   private readonly telemetryIntervalMs = 100
 
-  private readonly sphereSync = new BodySync()
-  private readonly boxSync = new BodySync()
 
   private animationFrameId: number | null = null
   private currentStatus: SimulationStatus = 'running'
@@ -70,7 +68,7 @@ export class SimulationEngine {
       this.sceneManager.camera,
       this.sceneManager.renderer.domElement,
     )
-    this.physicsWorld = new PhysicsWorld()
+    this.physicsWorld = new PhysicsWorld({}, { includeTestSphere: false })
     this.physicsWorld.setAeroEnabled(true)
     this.envController = new EnvironmentController(getPlanet('earth'))
     this.environment = new EnvironmentManager(this.physicsWorld, this.sceneManager, {
@@ -86,10 +84,10 @@ export class SimulationEngine {
       this.sceneManager.scene,
       (accentColor, config) => new RoverView(accentColor, config),
     )
+    this.drones = new DroneManager(this.physicsWorld.world, this.sceneManager.scene, (x, z) => getTerrainHeight(this.environment.heightfield, x, z))
+    this.habitats = new HabitatBuilder(this.physicsWorld.world, this.sceneManager.scene)
     this.cooperation = new CooperativeRescueCoordinator(this.robots, (x, z, seed) => this.spawnRover(x, z, seed))
     this.environment.switchPlanet('earth')
-    this.physicsWorld.createWindTestBox(this.boxSpawnPoint())
-    this.snapBoxToPhysics()
     this.handleResize()
     this.publishTelemetry(0)
 
@@ -117,16 +115,8 @@ export class SimulationEngine {
       simTime: this.clock.elapsed,
       status: this.currentStatus,
       gravity: { ...this.physicsWorld.gravity },
-      sphere: {
-        position: this.physicsWorld.spherePosition,
-        velocityY: this.physicsWorld.sphereVelocityY,
-      },
-      box: this.physicsWorld.hasWindTestBox
-        ? {
-            position: this.physicsWorld.boxPosition,
-            velocityY: this.physicsWorld.boxVelocityY,
-          }
-        : null,
+      sphere: { position: this.environment.spawnPoint, velocityY: 0 },
+      box: null,
       environment: this.envController.getState(),
       seed: info.seed,
       profileId: info.profileId,
@@ -160,13 +150,14 @@ export class SimulationEngine {
               gravityMps2: Math.abs(this.physicsWorld.gravity.y),
               traction: this.physicsWorld.terrainFriction,
             })
+            this.drones.preStep(dt, Math.abs(this.physicsWorld.gravity.y))
             this.cooperation.beforePhysics()
             this.physicsWorld.step(dt)
             this.robots.postStep(dt, { halfExtent: this.environment.info.terrainWidth / 2 })
             this.cooperation.update(dt, simTime + dt)
           }
-          this.pushBodyStates()
           this.robots.pushVisuals()
+          this.drones.sync()
         }
         this.renderInterpolated()
       }
@@ -213,22 +204,7 @@ export class SimulationEngine {
   public reset(): void {
     this.clock.reset()
     this.envController.snapToTime(0)
-    this.physicsWorld.resetSphere(this.environment.spawnPoint)
-    this.physicsWorld.resetWindTestBox(this.boxSpawnPoint())
     this.reseatRobots()
-    this.snapshotBodies()
-    this.renderInterpolated()
-    this.publishTelemetry(this.lastTelemetryEmit + this.telemetryIntervalMs)
-  }
-
-  public drop(): void {
-    this.clock.reset()
-    this.envController.snapToTime(0)
-    this.physicsWorld.resetSphere(this.environment.spawnPoint)
-    this.physicsWorld.resetWindTestBox(this.boxSpawnPoint())
-    this.reseatRobots()
-    this.currentStatus = 'running'
-    this.snapshotBodies()
     this.renderInterpolated()
     this.publishTelemetry(this.lastTelemetryEmit + this.telemetryIntervalMs)
   }
@@ -287,6 +263,12 @@ export class SimulationEngine {
       {},
       seed ?? this.environment.info.seed,
     )
+  }
+
+  public deployDrone(x: number, z: number): string { return this.drones.deploy(x, z) }
+
+  public buildHabitat(x: number, z: number): string {
+    return this.habitats.build(x, z, getTerrainHeight(this.environment.heightfield, x, z))
   }
 
   public removeRover(id: string): boolean {
@@ -413,20 +395,8 @@ export class SimulationEngine {
     this.sceneManager.setWeatherQuality(quality)
   }
 
-  public focusSphere(): void {
-    const pos = this.physicsWorld.spherePosition
-    this.cameraController.focusTarget(pos, 8)
-  }
-
-  public focusBox(): void {
-    if (this.physicsWorld.hasWindTestBox) {
-      const pos = this.physicsWorld.boxPosition
-      this.cameraController.focusTarget(pos, 8)
-    }
-  }
-
   public setTopDownView(): void {
-    const pos = this.physicsWorld.spherePosition
+    const pos = this.environment.spawnPoint
     this.cameraController.setTopDown(pos, 45)
   }
 
@@ -460,6 +430,7 @@ export class SimulationEngine {
     window.removeEventListener('resize', this.handleResize)
     this.cameraController.dispose()
     this.cooperation.dispose()
+    this.drones.dispose()
     this.robots.dispose()
     this.sceneManager.dispose()
     this.physicsWorld.dispose()
@@ -471,23 +442,9 @@ export class SimulationEngine {
     return wasRunning
   }
 
-  private boxSpawnPoint(): Vector3 {
-    const surfaceY = getTerrainHeight(
-      this.environment.heightfield,
-      BOX_SPAWN_OFFSET.x,
-      BOX_SPAWN_OFFSET.z,
-    )
-    return {
-      x: BOX_SPAWN_OFFSET.x,
-      y: surfaceY + SPAWN_CLEARANCE,
-      z: BOX_SPAWN_OFFSET.z,
-    }
-  }
-
   private refreshAfterSwitch(spawn: Vector3, config: PlanetConfig): void {
     this.lastConfig = config
     this.envController.resetForPlanet(config)
-    this.physicsWorld.resetWindTestBox(this.boxSpawnPoint())
     this.reseatRobots()
     const groundY = spawn.y - SPAWN_CLEARANCE
     const target = { x: spawn.x, y: groundY + config.camera.targetHeight, z: spawn.z }
@@ -504,7 +461,6 @@ export class SimulationEngine {
       config.camera.maxDistance,
       config.camera.maxPolarAngle,
     )
-    this.snapshotBodies()
     this.renderInterpolated()
     this.publishTelemetry(this.lastTelemetryEmit + this.telemetryIntervalMs)
   }
@@ -515,48 +471,20 @@ export class SimulationEngine {
     this.sceneManager.resize(width, height)
   }
 
-  private pushBodyStates(): void {
-    this.sphereSync.push(this.physicsWorld.spherePosition, this.physicsWorld.sphereRotation)
-    if (this.physicsWorld.hasWindTestBox) {
-      this.boxSync.push(this.physicsWorld.boxPosition, this.physicsWorld.boxRotation)
-    }
-  }
-
-  private snapshotBodies(): void {
-    this.sphereSync.snap(this.physicsWorld.spherePosition, this.physicsWorld.sphereRotation)
-    this.snapBoxToPhysics()
-  }
-
-  private snapBoxToPhysics(): void {
-    if (this.physicsWorld.hasWindTestBox) {
-      this.boxSync.snap(this.physicsWorld.boxPosition, this.physicsWorld.boxRotation)
-    }
-  }
-
   private renderInterpolated(): void {
-    const alpha = this.clock.alpha
-    const sphere = this.sphereSync.interpolate(alpha)
-    this.sceneManager.syncSphere(
-      { x: sphere.position.x, y: sphere.position.y, z: sphere.position.z },
-      { x: sphere.rotation.x, y: sphere.rotation.y, z: sphere.rotation.z, w: sphere.rotation.w },
-    )
-    if (this.physicsWorld.hasWindTestBox) {
-      const box = this.boxSync.interpolate(alpha)
-      this.sceneManager.syncBox(
-        { x: box.position.x, y: box.position.y, z: box.position.z },
-        { x: box.rotation.x, y: box.rotation.y, z: box.rotation.z, w: box.rotation.w },
-      )
-    }
-    this.robots.syncVisuals(alpha)
+    this.robots.syncVisuals(this.clock.alpha)
   }
 
   private publishTelemetry(timestamp: number): void {
-    const position = this.physicsWorld.spherePosition
-    const velocity = this.physicsWorld.sphereVelocity
+    const roverId = this.robots.ids()[0]
+    const rover = roverId ? this.robots.get(roverId) : null
+    const droneId = this.drones.ids()[0]
+    const position = rover?.position ?? (droneId ? this.drones.position(droneId) : null) ?? this.environment.spawnPoint
+    const velocity = rover?.inertial.linearVelocity ?? { x: 0, y: 0, z: 0 }
     const telemetry: TelemetryState = {
       time: this.clock.elapsed,
       position,
-      velocityY: this.physicsWorld.sphereVelocityY,
+      velocityY: velocity.y,
       velocity,
       gravity: this.physicsWorld.gravity,
       status: this.currentStatus,

@@ -35,17 +35,17 @@ export class PhysicsWorld {
   private terrainCollider: RAPIER.Collider | null = null
   private terrainBaseFriction = 0
   private lastAppliedFriction = Number.NaN
-  private readonly sphereBody: RAPIER.RigidBody
+  private readonly sphereBody: RAPIER.RigidBody | null
   private readonly initialSpherePosition: Vector3
   private windTestBox: RAPIER.RigidBody | null = null
   private aeroEnabled = false
   private readonly aeroBodies: RegisteredAeroBody[] = []
 
   public get isRunning(): boolean {
-    return this.sphereBody.isSleeping() === false
+    return this.sphereBody?.isSleeping() === false
   }
 
-  constructor(config: Partial<PhysicsConfig> = {}) {
+  constructor(config: Partial<PhysicsConfig> = {}, options: { includeTestSphere?: boolean } = {}) {
     if (!PhysicsWorld.initialized) {
       throw new Error('PhysicsWorld.init() must be awaited before creating a PhysicsWorld instance.')
     }
@@ -66,15 +66,14 @@ export class PhysicsWorld {
     this.initialSpherePosition = { ...this.config.sphereInitialPosition }
 
     this.staticBody = RigidBodyFactory.createGround(this.world, this.config)
-    this.sphereBody = RigidBodyFactory.createSphere(this.world, this.config)
-    // Sphere aerodynamics: Cd 0.47, cross-section PI * r^2. Documented assumption.
-    this.aeroBodies.push({
-      body: this.sphereBody,
-      params: {
+    this.sphereBody = options.includeTestSphere === false ? null : RigidBodyFactory.createSphere(this.world, this.config)
+    if (this.sphereBody) {
+      // Sphere aerodynamics: Cd 0.47, cross-section PI * r^2. Documented assumption.
+      this.aeroBodies.push({ body: this.sphereBody, params: {
         dragCoefficient: 0.47,
         area: Math.PI * this.config.sphereRadius * this.config.sphereRadius,
-      },
-    })
+      } })
+    }
   }
 
   /**
@@ -207,29 +206,33 @@ export class PhysicsWorld {
   }
 
   public resetSphere(position: Vector3 = this.initialSpherePosition): void {
-    RigidBodyFactory.resetBodyTranslation(this.sphereBody, { ...position })
+    if (this.sphereBody) RigidBodyFactory.resetBodyTranslation(this.sphereBody, { ...position })
   }
 
   public get spherePosition(): Vector3 {
+    if (!this.sphereBody) return { ...this.initialSpherePosition }
     const translation = this.sphereBody.translation()
     return { x: translation.x, y: translation.y, z: translation.z }
   }
 
   public get sphereRotation(): Quaternion {
+    if (!this.sphereBody) return { x: 0, y: 0, z: 0, w: 1 }
     const rotation = this.sphereBody.rotation()
     return { x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w }
   }
 
   public get sphereVelocity(): Vector3 {
+    if (!this.sphereBody) return { x: 0, y: 0, z: 0 }
     const velocity = this.sphereBody.linvel()
     return { x: velocity.x, y: velocity.y, z: velocity.z }
   }
 
   public get sphereVelocityY(): number {
-    return this.sphereBody.linvel().y
+    return this.sphereBody?.linvel().y ?? 0
   }
 
   public get sphereBodyReference(): RAPIER.RigidBody {
+    if (!this.sphereBody) throw new Error('Test sphere is disabled in this world.')
     return this.sphereBody
   }
 
