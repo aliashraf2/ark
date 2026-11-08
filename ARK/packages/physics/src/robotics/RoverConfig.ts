@@ -101,10 +101,19 @@ export interface RoverConfig {
   readonly wheelOffsets: ReadonlyArray<Readonly<{ x: number; z: number }>>
   /** Material density for all rover colliders, kg/m^3. */
   readonly density: number
-  /** Chassis/wheel friction coefficient against terrain. */
+    /** Chassis friction coefficient against terrain (belly skid-plate). */
   readonly friction: number
+  /**
+   * Wheel-collider friction. Deliberately low: the wheels are locked to the
+   * chassis (no rolling joints), so low Coulomb friction emulates free
+   * rolling; lateral grip and traction limits are enforced by drive
+   * computation instead. Park on slopes with the brake held.
+   */
+  readonly wheelFriction: number
   /** Restitution for rover colliders. */
   readonly restitution: number
+  /** Motor-curve top speed, m/s (DC-motor-style back-EMF approximation). */
+  readonly maxSpeed: number
   /** Peak drive force per side at effort 1, Newtons. */
   readonly maxDriveForce: number
   /** Peak yaw torque at full differential, Newton-meters. */
@@ -129,23 +138,42 @@ export interface RoverConfig {
   readonly sensorHeight: number
   /** Optional per-ray gaussian noise sigma in meters (0 = deterministic). */
   readonly sensorNoiseSigma: number
+  /**
+   * Angular damping, 1/s. Emulates shock absorbers: without it the rigid
+   * suspension-less body cartwheels off bumps at speed.
+   */
+  readonly angularDamping: number
 }
 
 export const DEFAULT_ROVER_CONFIG: RoverConfig = Object.freeze({
-  chassisHalfExtents: Object.freeze({ x: 0.3, y: 0.14, z: 0.45 }),
-  chassisHeight: 0.3,
+  // Short belly inside the wheelbase: the low-friction wheels lead fore and
+  // aft, so no high-friction structure can kickstand on slopes.
+  chassisHalfExtents: Object.freeze({ x: 0.3, y: 0.14, z: 0.28 }),
+  // Belly 0.19 m over the contact plane; wheels outboard (±0.42) like a real
+  // rover's outriggers for roll/pitch stability (static tip ~55°).
+  chassisHeight: 0.33,
   wheelRadius: 0.16,
   wheelOffsets: Object.freeze([
-    Object.freeze({ x: -0.32, z: 0.34 }),
-    Object.freeze({ x: 0.32, z: 0.34 }),
-    Object.freeze({ x: -0.32, z: -0.34 }),
-    Object.freeze({ x: 0.32, z: -0.34 }),
+    Object.freeze({ x: -0.42, z: 0.42 }),
+    Object.freeze({ x: 0.42, z: 0.42 }),
+    Object.freeze({ x: -0.42, z: -0.42 }),
+    Object.freeze({ x: 0.42, z: -0.42 }),
   ]),
   density: 110,
-  friction: 0.9,
+  // Belly skid-plate: low enough to slide off crests instead of anchoring.
+  friction: 0.4,
+  wheelFriction: 0.05,
+  maxSpeed: 6,
   restitution: 0.05,
-  maxDriveForce: 220,
-  maxYawTorque: 120,
+  // 40 N per side (80 N peak ≈ 0.45 g): stronger motors wheelie the light
+  // chassis into backflips. Earth is motor-limited; Mars traction-limits first.
+  maxDriveForce: 40,
+  // 1.5 N·m peak yaw torque. The compound inertia is small (~0.4 kg·m²),
+  // so even single-digit torques spin violently: 120 N·m pinned Rapier's
+  // angular-velocity cap in a few steps, and 6 N·m still rocked the body into
+  // chaotic rattleback-like reversals the controller could not settle.
+  // 1.5 N·m turns briskly (~1 rad/s) without exciting rocking.
+  maxYawTorque: 1.5,
   maxBrakeForce: 400,
   lateralGrip: 6,
   rollingResistance: 0.35,
@@ -156,6 +184,7 @@ export const DEFAULT_ROVER_CONFIG: RoverConfig = Object.freeze({
   sensorAngles: Object.freeze([-0.6981, -0.3491, 0, 0.3491, 0.6981]),
   sensorHeight: 0.32,
   sensorNoiseSigma: 0,
+  angularDamping: 1.0,
 })
 
 /** Rover construction overrides; unspecified fields keep defaults. */

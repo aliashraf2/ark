@@ -1539,6 +1539,37 @@ html, body, #app {
   word-break: break-word;
 }
 
+/* Rover battery bar (M5). */
+.rover-battery-track {
+  height: 6px;
+  margin-top: 0.6rem;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.rover-battery-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--accent-emerald);
+  transition: width 0.3s ease;
+}
+
+.rover-battery-fill.low {
+  background: var(--accent-red);
+}
+
+.preset-pill.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-color: var(--glass-border-bright);
+}
+
+.event-trigger-btn.active {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
 .mission-chat-section {
   min-height: 0;
 }

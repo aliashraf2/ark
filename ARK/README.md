@@ -19,14 +19,25 @@ Custom ports: `AGENT_PORT=8000 SIM_PORT=5173 ./scripts/dev.sh`
 ## Verify everything (one command)
 
 ```bash
-./scripts/test.sh          # backend pytest + web tests + typecheck + build
+./scripts/test.sh          # backend + web + headless determinism gate
 ./scripts/test.sh backend  # Python agent tests only
 ./scripts/test.sh web      # simulator tests + typecheck + build
+./scripts/test.sh headless # headless sim determinism gate only
+```
+
+## Headless simulator (no browser)
+
+```bash
+npm run sim:headless -- --planet mars --seed 42 --steps 600
+npm run sim:headless -- --steps 10000 --benchmark
+npm run sim:headless -- --check-determinism
 ```
 
 ## Layout
 
 - `apps/simulator/` — Svelte + Vite + Three.js + Rapier frontend
+- `packages/physics/` — shared headless-safe simulation core (physics, terrain, worlds, robotics)
+- `services/training/headless/` — Node CLI entry for the headless simulator
 - `services/agent/` — FastAPI + CSP mission-control backend (see its README)
 - `packages/shared/world-commands.json` — canonical world-command protocol
 - `scripts/` — one-command dev/test launchers

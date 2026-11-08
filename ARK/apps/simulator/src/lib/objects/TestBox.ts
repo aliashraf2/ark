@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import type { Quaternion, Vector3 } from '../types/SimulationTypes'
+import type { Quaternion, Vector3 } from '../../../../../packages/physics/src/types/SimulationTypes'
 
 /** Lightweight amber cube mirroring the wind-test physics box. */
 export class TestBox {

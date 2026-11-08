@@ -1,5 +1,5 @@
-import type { EnvironmentSnapshot } from '../types/EnvironmentTypes'
-import type { PlanetId } from '../worlds/PlanetConfig'
+import type { EnvironmentSnapshot } from '../../../../../packages/physics/src/types/EnvironmentTypes'
+import type { PlanetId } from '../../../../../packages/physics/src/worlds/PlanetConfig'
 import type { NormalizedCommand } from './WorldCommands'
 
 export interface BodySnapshot {

@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 
-import type { PlanetConfig } from '../worlds/PlanetConfig'
+import type { PlanetConfig } from '../../../../../packages/physics/src/worlds/PlanetConfig'
 
 /**
  * Shared planetary lighting + atmosphere appearance. One sun (directional with

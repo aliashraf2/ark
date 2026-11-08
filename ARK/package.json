@@ -1,0 +1,19 @@
+{
+  "name": "ark",
+  "version": "0.1.0",
+  "description": "ARK (Autonomous Reality Kernel) monorepo root.",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/simulator",
+    "packages/physics"
+  ],
+  "scripts": {
+    "sim:headless": "tsx services/training/headless/main.ts",
+    "simulator": "npm --workspace apps/simulator run dev",
+    "test": "npm --workspace apps/simulator run test"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}

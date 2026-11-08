@@ -1,0 +1,14 @@
+{
+  "name": "@ark/physics",
+  "version": "0.1.0",
+  "description": "ARK shared simulation core: physics, terrain, worlds, robotics. Imported relatively (no build step).",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
+    "simplex-noise": "^4.0.3"
+  },
+  "devDependencies": {
+    "vitest": "^5.1.0"
+  }
+}

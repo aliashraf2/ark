@@ -1,7 +1,7 @@
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type * as THREE from 'three'
 
-import type { Vector3 } from '../types/SimulationTypes'
+import type { Vector3 } from '../../../../../packages/physics/src/types/SimulationTypes'
 
 export class CameraController {
   public readonly controls: OrbitControls
@@ -27,7 +27,7 @@ export class CameraController {
     this.controls.update()
   }
 
-  public focusTarget(target: Vector3, distance: number = 8): void {
+  public focusTarget(target: Vector3, distance: number = 8, minHeightAbove = 0): void {
     const currentPos = this.controls.object.position
     const dx = currentPos.x - this.controls.target.x
     const dy = currentPos.y - this.controls.target.y
@@ -40,7 +40,7 @@ export class CameraController {
     this.controls.target.set(target.x, target.y, target.z)
     this.controls.object.position.set(
       target.x + nx * distance,
-      target.y + ny * distance,
+      Math.max(target.y + ny * distance, target.y + minHeightAbove),
       target.z + nz * distance,
     )
     this.controls.update()
@@ -57,6 +57,17 @@ export class CameraController {
     this.controls.maxDistance = maxDistance
     this.controls.maxPolarAngle = maxPolarAngle
     this.controls.update()
+  }
+
+  /** Translates camera and target together so the view follows a moving point. */
+  public trackTarget(next: Vector3): void {
+    const dx = next.x - this.controls.target.x
+    const dy = next.y - this.controls.target.y
+    const dz = next.z - this.controls.target.z
+    this.controls.target.set(next.x, next.y, next.z)
+    this.controls.object.position.x += dx
+    this.controls.object.position.y += dy
+    this.controls.object.position.z += dz
   }
 
   public update(): void {

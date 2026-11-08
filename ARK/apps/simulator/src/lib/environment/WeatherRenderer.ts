@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 
-import { mulberry32 } from '../terrain/terrainNoise'
-import type { EnvironmentState } from '../types/EnvironmentTypes'
-import type { Vector3 } from '../types/SimulationTypes'
+import { mulberry32 } from '../../../../../packages/physics/src/terrain/terrainNoise'
+import type { EnvironmentState } from '../../../../../packages/physics/src/types/EnvironmentTypes'
+import type { Vector3 } from '../../../../../packages/physics/src/types/SimulationTypes'
 
 export type WeatherQuality = 'low' | 'high'
 

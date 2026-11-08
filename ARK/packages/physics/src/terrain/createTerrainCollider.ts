@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat'
 
-import { buildTerrainMeshData } from './createTerrainGeometry'
+import { buildTerrainMeshData } from './terrainMeshData'
 import type { Heightfield } from './generateHeightfield'
 
 export interface TerrainColliderOptions {

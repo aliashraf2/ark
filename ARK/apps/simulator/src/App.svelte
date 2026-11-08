@@ -3,12 +3,19 @@
 
   import { SimulationEngine } from './lib/core/SimulationEngine'
   import type { EnvironmentInfo } from './lib/core/EnvironmentManager'
-  import { scenariosForPlanet } from './lib/environment/eventPresets'
+  import { scenariosForPlanet } from '../../../packages/physics/src/environment/eventPresets'
   import MissionPanel from './lib/mission/MissionPanel.svelte'
-  import { PhysicsWorld } from './lib/physics/PhysicsWorld'
-  import type { TelemetryState } from './lib/types/SimulationTypes'
-  import type { PlanetId } from './lib/worlds/PlanetConfig'
-  import { profilesForPlanet } from './lib/worlds/planetPresets'
+  import { PhysicsWorld } from '../../../packages/physics/src/physics/PhysicsWorld'
+  import {
+    ExternalController,
+    ManualController,
+    NavigationController,
+    type ManualKeyState,
+  } from '../../../packages/physics/src/robotics/controllers'
+  import type { RoverSnapshot } from '../../../packages/physics/src/robotics/RoverConfig'
+  import type { TelemetryState } from '../../../packages/physics/src/types/SimulationTypes'
+  import type { PlanetId } from '../../../packages/physics/src/worlds/PlanetConfig'
+  import { profilesForPlanet } from '../../../packages/physics/src/worlds/planetPresets'
 
   let container: HTMLDivElement
   let engine: SimulationEngine | null = null
@@ -38,6 +45,24 @@
   let aeroEnabled = true
   let envError: string | null = null
 
+  // Robotics (Milestone 5)
+  let roverIds: string[] = []
+  let selectedRover: string | null = null
+  let roverSnapshots: RoverSnapshot[] = []
+  let roverControlMode: 'manual' | 'navigation' | 'external' = 'manual'
+  let roverModes: Record<string, 'manual' | 'navigation' | 'external'> = {}
+  let manualKeys: ManualKeyState = {
+    forward: false,
+    reverse: false,
+    turnLeft: false,
+    turnRight: false,
+    brake: false,
+  }
+  let missionTargetX = 10
+  let missionTargetZ = 10
+  let followRoverEnabled = false
+  let roverRaysVisible = false
+
   let telemetry: TelemetryState = {
     time: 0,
     position: { x: 0, y: 0, z: 0 },
@@ -56,6 +81,7 @@
         container,
         (nextTelemetry) => {
           telemetry = nextTelemetry
+          refreshRovers()
         },
         (nextEnv) => {
           envInfo = nextEnv
@@ -77,6 +103,9 @@
 
       engine.start()
       window.addEventListener('keydown', handleKeydown)
+      window.addEventListener('keyup', handleKeyup)
+      // TEMPORARY diagnosis hook (removed before milestone sign-off).
+      ;(window as unknown as { __arkDebug: unknown }).__arkDebug = { getEngine: () => engine }
     } catch (error) {
       initError = error instanceof Error ? error.message : 'Failed to initialize the physics engine.'
     } finally {
@@ -86,6 +115,7 @@
 
   onDestroy(() => {
     window.removeEventListener('keydown', handleKeydown)
+    window.removeEventListener('keyup', handleKeyup)
     if (toastTimer) clearTimeout(toastTimer)
     engine?.destroy()
     engine = null
@@ -336,8 +366,181 @@
     if (envInfo) seedInput = String(envInfo.seed)
   }
 
+  // ---- Robotics (Milestone 5) ----
+
+  const ROVER_SPAWN_OFFSETS: ReadonlyArray<{ x: number; z: number }> = [
+    { x: 6, z: 0 },
+    { x: 6, z: 5 },
+    { x: -6, z: 0 },
+    { x: -6, z: 5 },
+    { x: 0, z: 7 },
+    { x: 0, z: -7 },
+  ]
+
+  function refreshRovers(): void {
+    if (!engine) return
+    roverIds = engine.robots.ids()
+    if (selectedRover && !roverIds.includes(selectedRover)) {
+      selectedRover = roverIds[0] ?? null
+    }
+    roverSnapshots = roverIds
+      .map((id) => engine?.robots.snapshot(id) ?? null)
+      .filter((snapshot): snapshot is RoverSnapshot => snapshot !== null)
+  }
+
+  // Reactive (not a template function call): Svelte must re-render rover
+  // readouts on every telemetry tick, and no-arg function calls in markup
+  // are not invalidated by the array reassignment in refreshRovers().
+  $: selectedSnap = roverSnapshots.find((snapshot) => snapshot.id === selectedRover) ?? null
+
+  function spawnRoverUI(): void {
+    if (!engine || !envInfo) return
+    const halfExtent = envInfo.terrainWidth / 2 - 6
+    const offset = ROVER_SPAWN_OFFSETS[roverIds.length % ROVER_SPAWN_OFFSETS.length] ?? { x: 6, z: 0 }
+    const x = Math.max(-halfExtent, Math.min(halfExtent, offset.x))
+    const z = Math.max(-halfExtent, Math.min(halfExtent, offset.z))
+    const id = engine.spawnRover(x, z)
+    roverModes[id] = 'manual'
+    selectedRover = id
+    roverControlMode = 'manual'
+    refreshRovers()
+    showToast(`Rover ${id} deployed`)
+  }
+
+  function removeSelectedRover(): void {
+    if (!engine || !selectedRover) return
+    const id = selectedRover
+    if (followRoverEnabled && engine.followRover === id) {
+      followRoverEnabled = false
+    }
+    engine.removeRover(id)
+    delete roverModes[id]
+    selectedRover = null
+    refreshRovers()
+    showToast(`Rover ${id} removed`)
+  }
+
+  function selectRover(id: string): void {
+    selectedRover = id
+    roverControlMode = roverModes[id] ?? 'manual'
+    if (followRoverEnabled && engine) {
+      engine.setFollowRover(id)
+    }
+  }
+
+  function setRoverMode(mode: 'manual' | 'navigation' | 'external'): void {
+    if (!engine || !selectedRover) return
+    roverControlMode = mode
+    roverModes[selectedRover] = mode
+    if (mode === 'manual') {
+      const controller = new ManualController()
+      controller.setKeys(manualKeys)
+      engine.robots.setController(selectedRover, controller)
+    } else if (mode === 'navigation') {
+      engine.robots.setController(selectedRover, new NavigationController())
+      showToast('Autonomous waypoint control engaged')
+    } else {
+      // Placeholder policy: hold position. Real policies attach programmatically
+      // (see RoverEnv) or via a future policy loader — never LLM per-frame control.
+      engine.robots.setController(
+        selectedRover,
+        new ExternalController(() => ({ left: 0, right: 0, brake: true, eStop: false })),
+      )
+      showToast('External controller mode (holding position)')
+    }
+  }
+
+  function pushManualKeys(): void {
+    if (!engine || !selectedRover) return
+    const controller = engine.robots.getController(selectedRover)
+    if (controller instanceof ManualController) {
+      controller.setKeys(manualKeys)
+    }
+  }
+
+  function startRoverMission(): void {
+    if (!engine || !selectedRover || !envInfo) return
+    const halfExtent = envInfo.terrainWidth / 2 - 4
+    const clamp = (value: number): number => Math.max(-halfExtent, Math.min(halfExtent, value))
+    const rover = engine.robots.get(selectedRover)
+    if (!rover) return
+    const existing = engine.robots.missions.missionForRover(selectedRover)
+    if (existing) {
+      if (existing.status === 'active') {
+        showToast('Mission already active')
+        return
+      }
+      engine.robots.missions.start(existing.id)
+    } else {
+      const mission = engine.robots.missions.create(
+        selectedRover,
+        rover.position,
+        { x: clamp(Number(missionTargetX)), y: 0, z: clamp(Number(missionTargetZ)) },
+        2,
+        180,
+      )
+      engine.robots.missions.start(mission.id)
+    }
+    if ((roverModes[selectedRover] ?? 'manual') !== 'navigation') {
+      setRoverMode('navigation')
+    }
+    refreshRovers()
+    showToast(`Mission active: navigate to (${missionTargetX}, ${missionTargetZ})`)
+  }
+
+  function resetRoverMission(): void {
+    if (!engine || !selectedRover) return
+    const mission = engine.robots.missions.missionForRover(selectedRover)
+    if (mission) {
+      engine.robots.missions.resetMission(mission.id)
+      refreshRovers()
+      showToast('Mission reset to pending')
+    }
+  }
+
+  function toggleFollowRover(): void {
+    if (!engine || !selectedRover) return
+    followRoverEnabled = !followRoverEnabled
+    engine.setFollowRover(followRoverEnabled ? selectedRover : null)
+    showToast(followRoverEnabled ? 'Camera: Following Rover' : 'Camera: Free Orbit')
+  }
+
+  function toggleRoverRays(): void {
+    if (!engine) return
+    roverRaysVisible = !roverRaysVisible
+    engine.robots.setRaysVisible(roverRaysVisible)
+  }
+
+  function manualDriveActive(): boolean {
+    return (
+      selectedRover !== null &&
+      (roverModes[selectedRover] ?? 'manual') === 'manual' &&
+      !controlsDisabled
+    )
+  }
+
+  function applyDriveKey(key: string, pressed: boolean): boolean {
+    if (!manualDriveActive()) return false
+    if (key === 'ArrowUp') manualKeys.forward = pressed
+    else if (key === 'ArrowDown') manualKeys.reverse = pressed
+    else if (key === 'ArrowLeft') manualKeys.turnLeft = pressed
+    else if (key === 'ArrowRight') manualKeys.turnRight = pressed
+    else if (key === 'b' || key === 'B') manualKeys.brake = pressed
+    else return false
+    pushManualKeys()
+    return true
+  }
+
+  function handleKeyup(event: KeyboardEvent): void {
+    applyDriveKey(event.key, false)
+  }
+
   function handleKeydown(event: KeyboardEvent): void {
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes((event.target as HTMLElement)?.tagName)) {
+      return
+    }
+    if (applyDriveKey(event.key, true)) {
+      event.preventDefault()
       return
     }
     if (event.code === 'Space') {
@@ -1244,6 +1447,207 @@
         </div>
       </div>
       <div class="dock-tab-pane" class:hidden={activeTab !== 'robot'} role="tabpanel">
+        <!-- Rover Fleet (Milestone 5) -->
+        <div class="dock-section">
+          <div class="section-title-row">
+            <h3 class="section-title">Rover Fleet</h3>
+            <span class="section-badge">{roverIds.length} ACTIVE</span>
+          </div>
+
+          {#if roverIds.length === 0}
+            <p class="mission-hint">No rovers deployed. Spawn one to begin surface operations.</p>
+          {:else}
+            <div class="presets-pill-row">
+              {#each roverIds as id (id)}
+                <button
+                  type="button"
+                  class="preset-pill"
+                  class:active={id === selectedRover}
+                  on:click={() => selectRover(id)}
+                >
+                  {id}
+                </button>
+              {/each}
+            </div>
+          {/if}
+
+          <div class="event-triggers-grid">
+            <button
+              type="button"
+              class="event-trigger-btn"
+              on:click={spawnRoverUI}
+              disabled={controlsDisabled}
+            >
+              <span>Spawn Rover</span>
+            </button>
+            <button
+              type="button"
+              class="event-trigger-btn"
+              on:click={removeSelectedRover}
+              disabled={controlsDisabled || !selectedRover}
+            >
+              <span>Remove</span>
+            </button>
+          </div>
+        </div>
+
+        {#if selectedSnap}
+          {@const snap = selectedSnap}
+          <div class="dock-section">
+            <div class="section-title-row">
+              <h3 class="section-title">Control · {selectedRover}</h3>
+              <span class="section-badge">{roverControlMode.toUpperCase()}</span>
+            </div>
+
+            <div class="presets-pill-row">
+              <button
+                type="button"
+                class="preset-pill"
+                class:active={roverControlMode === 'manual'}
+                on:click={() => setRoverMode('manual')}
+              >
+                Manual
+              </button>
+              <button
+                type="button"
+                class="preset-pill"
+                class:active={roverControlMode === 'navigation'}
+                on:click={() => setRoverMode('navigation')}
+              >
+                Auto Nav
+              </button>
+              <button
+                type="button"
+                class="preset-pill"
+                class:active={roverControlMode === 'external'}
+                on:click={() => setRoverMode('external')}
+              >
+                External
+              </button>
+            </div>
+            {#if roverControlMode === 'manual'}
+              <p class="mission-hint">Drive: ↑ forward · ↓ reverse · ←/→ turn · B brake</p>
+            {/if}
+
+            <div class="hud-metric-grid">
+              <div class="hud-metric-item">
+                <span class="hud-metric-label">Battery</span>
+                <span class="hud-metric-val">{((snap?.battery.percent ?? 0) * 100).toFixed(0)}%</span>
+              </div>
+              <div class="hud-metric-item">
+                <span class="hud-metric-label">Speed</span>
+                <span class="hud-metric-val">{(snap?.speed ?? 0).toFixed(1)} m/s</span>
+              </div>
+              <div class="hud-metric-item">
+                <span class="hud-metric-label">Position</span>
+                <span class="hud-metric-val mono">
+                  {(snap?.position.x ?? 0).toFixed(1)}, {(snap?.position.z ?? 0).toFixed(1)}
+                </span>
+              </div>
+              <div class="hud-metric-item">
+                <span class="hud-metric-label">Heading</span>
+                <span class="hud-metric-val">
+                  {(((((snap?.yawRad ?? 0) * 180) / Math.PI) % 360 + 360) % 360).toFixed(0)}°
+                </span>
+              </div>
+            </div>
+            <div class="rover-battery-track" title="Battery charge">
+              <div
+                class="rover-battery-fill"
+                class:low={(snap?.battery.percent ?? 1) < 0.25}
+                style={`width: ${((snap?.battery.percent ?? 0) * 100).toFixed(1)}%`}
+              ></div>
+            </div>
+          </div>
+
+          <div class="dock-section">
+            <div class="section-title-row">
+              <h3 class="section-title">Navigation Mission</h3>
+              <span class="section-badge">{(snap?.missionStatus ?? 'none').toUpperCase()}</span>
+            </div>
+            <div class="control-group">
+              <div class="control-label-row">
+                <span class="control-label">Target X (m)</span>
+                <span class="control-label">Target Z (m)</span>
+              </div>
+              <div class="seed-action-row">
+                <input
+                  class="ark-input mono"
+                  type="number"
+                  bind:value={missionTargetX}
+                  disabled={controlsDisabled}
+                  aria-label="Mission target X"
+                />
+                <input
+                  class="ark-input mono"
+                  type="number"
+                  bind:value={missionTargetZ}
+                  disabled={controlsDisabled}
+                  aria-label="Mission target Z"
+                />
+              </div>
+            </div>
+            <div class="event-triggers-grid">
+              <button
+                type="button"
+                class="event-trigger-btn"
+                on:click={startRoverMission}
+                disabled={controlsDisabled}
+              >
+                <span>Start Mission</span>
+              </button>
+              <button
+                type="button"
+                class="event-trigger-btn"
+                on:click={resetRoverMission}
+                disabled={controlsDisabled}
+              >
+                <span>Reset Mission</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="dock-section">
+            <div class="section-title-row">
+              <h3 class="section-title">Rover Camera</h3>
+            </div>
+            <div class="event-triggers-grid">
+              <button
+                type="button"
+                class="event-trigger-btn"
+                on:click={() => selectedRover && engine?.focusRover(selectedRover)}
+                disabled={controlsDisabled}
+              >
+                <span>Focus Rover</span>
+              </button>
+              <button
+                type="button"
+                class="event-trigger-btn"
+                class:active={followRoverEnabled}
+                on:click={toggleFollowRover}
+                disabled={controlsDisabled}
+              >
+                <span>{followRoverEnabled ? 'Stop Follow' : 'Follow'}</span>
+              </button>
+            </div>
+            <div class="switch-row">
+              <div class="switch-label-wrap">
+                <span class="switch-title">Sensor-ray visualization</span>
+                <span class="switch-subtext">Show the 5 distance-sensor rays</span>
+              </div>
+              <label class="apple-switch">
+                <input
+                  type="checkbox"
+                  checked={roverRaysVisible}
+                  on:change={toggleRoverRays}
+                  disabled={controlsDisabled}
+                />
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+          </div>
+        {/if}
+
         <!-- Payload Specifications -->
         <div class="dock-section">
           <div class="section-title-row">

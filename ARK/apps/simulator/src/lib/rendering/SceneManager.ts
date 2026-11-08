@@ -4,10 +4,10 @@ import { LightingSystem } from '../environment/LightingSystem'
 import { WeatherRenderer, type WeatherQuality } from '../environment/WeatherRenderer'
 import { Sphere } from '../objects/Sphere'
 import { TestBox } from '../objects/TestBox'
-import type { EnvironmentState } from '../types/EnvironmentTypes'
-import type { Quaternion, Vector3 } from '../types/SimulationTypes'
-import { DEFAULT_PHYSICS_CONFIG } from '../types/SimulationTypes'
-import type { PlanetConfig } from '../worlds/PlanetConfig'
+import type { EnvironmentState } from '../../../../../packages/physics/src/types/EnvironmentTypes'
+import type { Quaternion, Vector3 } from '../../../../../packages/physics/src/types/SimulationTypes'
+import { DEFAULT_PHYSICS_CONFIG } from '../../../../../packages/physics/src/types/SimulationTypes'
+import type { PlanetConfig } from '../../../../../packages/physics/src/worlds/PlanetConfig'
 
 export class SceneManager {
   public readonly scene = new THREE.Scene()

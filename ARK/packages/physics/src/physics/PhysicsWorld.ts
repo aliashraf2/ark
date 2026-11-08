@@ -60,6 +60,8 @@ export class PhysicsWorld {
     this.gravity = this.config.gravity
     this.world = new RAPIER.World(this.gravity)
     this.world.timestep = FIXED_TIME_STEP
+    this.terrainBaseFriction = this.config.groundFriction
+    this.lastAppliedFriction = this.config.groundFriction
 
     this.initialSpherePosition = { ...this.config.sphereInitialPosition }
 
@@ -138,6 +140,11 @@ export class PhysicsWorld {
 
   public get isAeroEnabled(): boolean {
     return this.aeroEnabled
+  }
+
+  /** Effective ground friction currently applied (base × traction multiplier). */
+  public get terrainFriction(): number {
+    return this.lastAppliedFriction
   }
 
   /**

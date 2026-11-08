@@ -1,5 +1,5 @@
-import type { PlanetId } from '../worlds/PlanetConfig'
-import { getPlanet } from '../worlds/planetPresets'
+import type { PlanetId } from '../../../../../packages/physics/src/worlds/PlanetConfig'
+import { getPlanet } from '../../../../../packages/physics/src/worlds/planetPresets'
 
 export type WorldCommandId =
   | 'get_world_state'

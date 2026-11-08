@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 
-import type { EnvironmentState } from '../types/EnvironmentTypes'
+import type { EnvironmentState } from '../../../../../packages/physics/src/types/EnvironmentTypes'
 import { WeatherRenderer } from './WeatherRenderer'
 
 function makeState(overrides: Partial<EnvironmentState> = {}): EnvironmentState {

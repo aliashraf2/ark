@@ -1,17 +1,21 @@
-import { EnvironmentController, type StartEventSpec } from '../environment/EnvironmentController'
-import { getScenario } from '../environment/eventPresets'
-import { surfaceAt } from '../environment/SurfaceSystem'
-import { PhysicsWorld } from '../physics/PhysicsWorld'
+import { EnvironmentController, type StartEventSpec } from '../../../../../packages/physics/src/environment/EnvironmentController'
+import { getScenario } from '../../../../../packages/physics/src/environment/eventPresets'
+import { surfaceAt } from '../../../../../packages/physics/src/environment/SurfaceSystem'
+import { PhysicsWorld } from '../../../../../packages/physics/src/physics/PhysicsWorld'
+import { RobotManager } from '../../../../../packages/physics/src/robotics/RobotManager'
+import { RoverView } from '../robotics/RoverView'
+import { resolveRoverConfig } from '../../../../../packages/physics/src/robotics/RoverConfig'
+import { downhillYaw, findSpawnSite, footprintSpawnHeight } from '../../../../../packages/physics/src/robotics/RoverDynamics'
 import { CameraController } from '../rendering/CameraController'
 import { BodySync } from '../rendering/BodySync'
 import { SceneManager } from '../rendering/SceneManager'
-import { getTerrainHeight } from '../terrain/terrainSampling'
-import type { EnvironmentSnapshot } from '../types/EnvironmentTypes'
-import type { SimulationStatus, TelemetryState, Vector3 } from '../types/SimulationTypes'
-import type { PlanetConfig, PlanetId } from '../worlds/PlanetConfig'
-import { getPlanet } from '../worlds/planetPresets'
+import { getTerrainHeight } from '../../../../../packages/physics/src/terrain/terrainSampling'
+import type { EnvironmentSnapshot } from '../../../../../packages/physics/src/types/EnvironmentTypes'
+import type { SimulationStatus, TelemetryState, Vector3 } from '../../../../../packages/physics/src/types/SimulationTypes'
+import type { PlanetConfig, PlanetId } from '../../../../../packages/physics/src/worlds/PlanetConfig'
+import { getPlanet } from '../../../../../packages/physics/src/worlds/planetPresets'
 import { EnvironmentManager, SPAWN_CLEARANCE, type EnvironmentInfo } from './EnvironmentManager'
-import { SimulationClock } from './SimulationClock'
+import { SimulationClock } from '../../../../../packages/physics/src/core/SimulationClock'
 
 export type { StartEventSpec }
 
@@ -30,6 +34,7 @@ export class SimulationEngine {
   public readonly sceneManager: SceneManager
   public readonly environment: EnvironmentManager
   public readonly envController: EnvironmentController
+  public readonly robots: RobotManager
 
   private readonly clock = new SimulationClock()
   private readonly cameraController: CameraController
@@ -47,6 +52,7 @@ export class SimulationEngine {
   private lastFrameTimestamp = 0
   private destroyRequested = false
   private lastConfig: PlanetConfig | null = null
+  private followRoverId: string | null = null
 
   constructor(
     container: HTMLElement,
@@ -72,6 +78,12 @@ export class SimulationEngine {
       refresh: (spawn, config) => this.refreshAfterSwitch(spawn, config),
     })
 
+    // RobotManager before the first planet load: refreshAfterSwitch reseats rovers.
+    this.robots = new RobotManager(
+      this.physicsWorld.world,
+      this.sceneManager.scene,
+      (accentColor, config) => new RoverView(accentColor, config),
+    )
     this.environment.switchPlanet('earth')
     this.physicsWorld.createWindTestBox(this.boxSpawnPoint())
     this.snapBoxToPhysics()
@@ -140,9 +152,18 @@ export class SimulationEngine {
             const simTime = frameStartTime + i * dt
             const env = this.envController.update(simTime, dt)
             this.physicsWorld.applyEnvironment(env)
+            this.robots.preStep({
+              dt,
+              gravityMps2: Math.abs(this.physicsWorld.gravity.y),
+              traction: this.physicsWorld.terrainFriction,
+            })
             this.physicsWorld.step(dt)
           }
+          this.robots.postStep(steps * dt, {
+            halfExtent: this.environment.info.terrainWidth / 2,
+          })
           this.pushBodyStates()
+          this.robots.pushVisuals()
         }
         this.renderInterpolated()
       }
@@ -153,6 +174,14 @@ export class SimulationEngine {
         this.envController.getState(),
         this.cameraController.controls.target,
       )
+      if (this.followRoverId) {
+        const followed = this.robots.get(this.followRoverId)
+        if (followed) {
+          this.cameraController.trackTarget(followed.position)
+        } else {
+          this.followRoverId = null
+        }
+      }
       this.cameraController.update()
       this.sceneManager.render()
 
@@ -183,6 +212,7 @@ export class SimulationEngine {
     this.envController.snapToTime(0)
     this.physicsWorld.resetSphere(this.environment.spawnPoint)
     this.physicsWorld.resetWindTestBox(this.boxSpawnPoint())
+    this.reseatRobots()
     this.snapshotBodies()
     this.renderInterpolated()
     this.publishTelemetry(this.lastTelemetryEmit + this.telemetryIntervalMs)
@@ -193,6 +223,7 @@ export class SimulationEngine {
     this.envController.snapToTime(0)
     this.physicsWorld.resetSphere(this.environment.spawnPoint)
     this.physicsWorld.resetWindTestBox(this.boxSpawnPoint())
+    this.reseatRobots()
     this.currentStatus = 'running'
     this.snapshotBodies()
     this.renderInterpolated()
@@ -206,17 +237,74 @@ export class SimulationEngine {
 
   public regenerateTerrain(seed?: number): void {
     const info = this.environment.regenerate(seed)
+    this.reseatRobots()
     this.environmentCallback?.(info)
   }
 
   public setTerrainProfile(profileId: string): void {
     const info = this.environment.setProfile(profileId)
+    this.reseatRobots()
     this.environmentCallback?.(info)
   }
 
   public resetWorld(): void {
     const info = this.environment.resetWorld()
+    this.reseatRobots()
     this.environmentCallback?.(info)
+  }
+
+  /**
+   * Spawns a rover near (x, z) on a drivable slope, facing downhill, dropped
+   * from a footprint-clearing height. Returns the rover id.
+   */
+  public spawnRover(x: number, z: number, seed?: number): string {
+    const heightfield = this.environment.heightfield
+    const sample = (sx: number, sz: number) => getTerrainHeight(heightfield, sx, sz)
+    const site = findSpawnSite(sample, x, z)
+    const wheels = resolveRoverConfig({}).wheelOffsets
+    const yaw = downhillYaw(
+      (sample(site.x + 1.5, site.z) - sample(site.x - 1.5, site.z)) / 3,
+      (sample(site.x, site.z + 1.5) - sample(site.x, site.z - 1.5)) / 3,
+    )
+    return this.robots.spawn(
+      {
+        position: { x: site.x, y: footprintSpawnHeight(sample, site.x, site.z, yaw, wheels), z: site.z },
+        yawRad: yaw,
+      },
+      {},
+      seed ?? this.environment.info.seed,
+    )
+  }
+
+  public removeRover(id: string): boolean {
+    if (this.followRoverId === id) this.followRoverId = null
+    return this.robots.remove(id)
+  }
+
+  public focusRover(id: string): void {
+    const rover = this.robots.get(id)
+    if (rover) this.cameraController.focusTarget(rover.position, 9, 4)
+  }
+
+  public setFollowRover(id: string | null): void {
+    this.followRoverId = id && this.robots.get(id) ? id : null
+  }
+
+  public get followRover(): string | null {
+    return this.followRoverId
+  }
+
+  /** Re-seats all rovers onto the current terrain (reset / switch / regen). */
+  private reseatRobots(): void {
+    const info = this.environment.info
+    const heightfield = this.environment.heightfield
+    this.robots.handleWorldChange(
+      {
+        surfaceY: (x: number, z: number) => getTerrainHeight(heightfield, x, z),
+        halfExtent: info.terrainWidth / 2,
+      },
+      info.seed,
+    )
   }
 
   // ---- Typed environment operations (future CSP surface) ----
@@ -358,6 +446,7 @@ export class SimulationEngine {
 
     window.removeEventListener('resize', this.handleResize)
     this.cameraController.dispose()
+    this.robots.dispose()
     this.sceneManager.dispose()
     this.physicsWorld.dispose()
   }
@@ -385,6 +474,7 @@ export class SimulationEngine {
     this.lastConfig = config
     this.envController.resetForPlanet(config)
     this.physicsWorld.resetWindTestBox(this.boxSpawnPoint())
+    this.reseatRobots()
     const groundY = spawn.y - SPAWN_CLEARANCE
     const target = { x: spawn.x, y: groundY + config.camera.targetHeight, z: spawn.z }
     this.cameraController.frame(
@@ -443,6 +533,7 @@ export class SimulationEngine {
         { x: box.rotation.x, y: box.rotation.y, z: box.rotation.z, w: box.rotation.w },
       )
     }
+    this.robots.syncVisuals(alpha)
   }
 
   private publishTelemetry(timestamp: number): void {

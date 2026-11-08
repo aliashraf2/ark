@@ -5,12 +5,13 @@ import { mulberry32 } from '../terrain/terrainNoise'
 import type { DriveAction, InertialReading, RangeReading, RoverConfig } from './RoverConfig'
 import {
   addGaussianNoise,
+  angleDifference,
   batteryReading,
   computeDrive,
   eulerFromQuaternion,
-  forwardFromYaw,
   inertialFromBody,
   powerDrawW,
+  rayDirectionFromBody,
   stepBatteryCharge,
   validateAction,
   type DriveContext,
@@ -46,6 +47,8 @@ export class Rover {
   private lastAction = { left: 0, right: 0, brake: false, eStop: false }
   private random: () => number
   private lastRanges: RangeReading[] = []
+  private lastYaw: number
+  private yawRateValue = 0
 
   constructor(world: RAPIER.World, id: string, config: RoverConfig, spawn: RoverSpawn, seed: number) {
     this.world = world
@@ -55,12 +58,13 @@ export class Rover {
     this.random = mulberry32(seed)
 
     const yaw = spawn.yawRad ?? 0
+    this.lastYaw = yaw
     this.body = world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(spawn.position.x, spawn.position.y, spawn.position.z)
         .setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) })
         .setLinearDamping(0)
-        .setAngularDamping(0.6)
+        .setAngularDamping(config.angularDamping)
         .setCanSleep(false),
     )
 
@@ -76,7 +80,11 @@ export class Rover {
       const wheel = RAPIER.ColliderDesc.ball(config.wheelRadius)
         .setTranslation(offset.x, config.wheelRadius, offset.z)
         .setDensity(config.density)
-        .setFriction(config.friction)
+        .setFriction(config.wheelFriction)
+        // Min (not Rapier's default Average): the wheels are free rollers, so
+        // the contact must stay ~0.05 instead of averaging up to ~0.5 with the
+        // terrain. All traction logic lives in computeDrive's budget.
+        .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
         .setRestitution(config.restitution)
       world.createCollider(wheel, this.body)
     }
@@ -101,6 +109,23 @@ export class Rover {
 
   public get yawRad(): number {
     return eulerFromQuaternion(this.rotation).yaw
+  }
+
+  /**
+   * Yaw rate from successive yaw readings (rad/s), updated by updateYawRate().
+   * Derived from the proven orientation readout rather than the raw angular
+   * velocity binding, which proved untrustworthy in the browser build.
+   */
+  public get yawRate(): number {
+    return this.yawRateValue
+  }
+
+  /** Advances the finite-difference yaw-rate tracker over one step of dt. */
+  public updateYawRate(dt: number): void {
+    if (!(dt > 0)) return
+    const yaw = this.yawRad
+    this.yawRateValue = angleDifference(this.lastYaw, yaw) / dt
+    this.lastYaw = yaw
   }
 
   public get linearVelocity(): Vector3 {
@@ -166,10 +191,10 @@ export class Rover {
   public senseRanges(): ReadonlyArray<RangeReading> {
     const origin = this.position
     const sensorY = origin.y + this.config.chassisHeight + this.config.sensorHeight
-    const yaw = this.yawRad
+    const rotation = this.rotation
     this.lastRanges = this.config.sensorAngles.map((angle) => {
-      const worldAngle = yaw + angle
-      const dir = forwardFromYaw(worldAngle)
+      // Body-mounted rays: pitch and roll with the chassis on slopes.
+      const dir = rayDirectionFromBody(rotation, angle)
       const ray = new RAPIER.Ray({ x: origin.x, y: sensorY, z: origin.z }, dir)
       const hit = this.world.castRay(
         ray,
@@ -212,6 +237,8 @@ export class Rover {
   /** Restores spawn transform, clears velocities, refills battery, reseeds noise. */
   public reset(spawn: RoverSpawn, seed: number): void {
     const yaw = spawn.yawRad ?? 0
+    this.lastYaw = yaw
+    this.yawRateValue = 0
     this.body.setTranslation({ x: spawn.position.x, y: spawn.position.y, z: spawn.position.z }, true)
     this.body.setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, true)
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true)

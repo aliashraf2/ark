@@ -10,6 +10,8 @@ import { headingControlAction, validateAction } from './RoverDynamics'
 export interface ControlInput {
   position: Vector3
   yawRad: number
+  /** Yaw rate, rad/s (ideal ground-truth inertial). */
+  yawRateRadS: number
   speed: number
   ranges: ReadonlyArray<RangeReading>
   target: Vector3 | null
@@ -50,10 +52,12 @@ export class ManualController implements Controller {
   public update(_input: ControlInput, _dt: number): DriveAction {
     const throttle = (this.keys.forward ? 1 : 0) - (this.keys.reverse ? 1 : 0)
     const turn = (this.keys.turnLeft ? 1 : 0) - (this.keys.turnRight ? 1 : 0)
+    // Parking hold: no input means brake, so the rover never rolls away alone.
+    const hold = throttle === 0 && turn === 0
     return {
       left: Math.max(-1, Math.min(1, throttle - turn * 0.7)),
       right: Math.max(-1, Math.min(1, throttle + turn * 0.7)),
-      brake: this.keys.brake,
+      brake: this.keys.brake || hold,
       eStop: false,
     }
   }
@@ -65,14 +69,17 @@ export class ManualController implements Controller {
 
 export interface NavigationGains {
   readonly heading: number
+  /** Derivative gain on yaw rate: stops endless spin-in-place overshoot. */
+  readonly yawDamping: number
   readonly maxTurn: number
   readonly cruise: number
 }
 
 export const DEFAULT_NAVIGATION_GAINS: NavigationGains = Object.freeze({
-  heading: 1.6,
-  maxTurn: 0.85,
-  cruise: 0.55,
+  heading: 0.8,
+  yawDamping: 1.2,
+  maxTurn: 0.6,
+  cruise: 0.4,
 })
 
 /**
@@ -98,8 +105,9 @@ export class NavigationController implements Controller {
     const forwardRays = input.ranges.filter((reading) => Math.abs(reading.angleRad) <= 0.35)
     const minForward =
       forwardRays.length > 0 ? Math.min(...forwardRays.map((reading) => reading.distance)) : 0
-    return headingControlAction(input.yawRad, bearing, minForward, false, {
+    return headingControlAction(input.yawRad, input.yawRateRadS, bearing, minForward, false, {
       heading: this.gains.heading,
+      yawDamping: this.gains.yawDamping,
       maxTurn: this.gains.maxTurn,
       cruise: this.gains.cruise,
     })

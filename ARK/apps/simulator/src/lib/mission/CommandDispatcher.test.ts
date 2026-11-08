@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import type { StartEventSpec } from '../environment/EnvironmentController'
-import type { PlanetId } from '../worlds/PlanetConfig'
+import type { StartEventSpec } from '../../../../../packages/physics/src/environment/EnvironmentController'
+import type { PlanetId } from '../../../../../packages/physics/src/worlds/PlanetConfig'
 import { CommandDispatcher, type CommandExecutor } from './CommandDispatcher'
 import type { WorldStateSnapshot } from './MissionTypes'
 import { normalizeCommand, type NormalizedCommand } from './WorldCommands'

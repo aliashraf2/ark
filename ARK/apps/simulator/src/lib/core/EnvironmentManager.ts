@@ -1,18 +1,18 @@
 import type * as THREE from 'three'
 
 import { createTerrainGeometry } from '../terrain/createTerrainGeometry'
-import type { Heightfield } from '../terrain/generateHeightfield'
-import { generateHeightfield } from '../terrain/generateHeightfield'
-import { makeTerrainColorFn } from '../terrain/terrainMaterials'
-import { getTerrainHeight } from '../terrain/terrainSampling'
-import type { PlanetConfig, PlanetId } from '../worlds/PlanetConfig'
+import type { Heightfield } from '../../../../../packages/physics/src/terrain/generateHeightfield'
+import { generateHeightfield } from '../../../../../packages/physics/src/terrain/generateHeightfield'
+import { makeTerrainColorFn } from '../../../../../packages/physics/src/terrain/terrainMaterials'
+import { getTerrainHeight } from '../../../../../packages/physics/src/terrain/terrainSampling'
+import type { PlanetConfig, PlanetId } from '../../../../../packages/physics/src/worlds/PlanetConfig'
 import {
   defaultProfileForPlanet,
   getPlanet,
   profilesForPlanet,
   resolveTerrainParams,
-} from '../worlds/planetPresets'
-import type { Vector3 } from '../types/SimulationTypes'
+} from '../../../../../packages/physics/src/worlds/planetPresets'
+import type { Vector3 } from '../../../../../packages/physics/src/types/SimulationTypes'
 
 /** Simulation build tag recorded with every generated world. */
 export const SIM_VERSION = 'ark-m3-1'

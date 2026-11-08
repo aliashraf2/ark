@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-import { getPlanet } from '../worlds/planetPresets'
+import { getPlanet } from '../../../../../packages/physics/src/worlds/planetPresets'
 import {
   normalizeCommand,
   WORLD_COMMANDS,

@@ -74,6 +74,120 @@ export function forwardFromYaw(yawRad: number): Vector3 {
   return { x: Math.sin(yawRad), y: 0, z: Math.cos(yawRad) }
 }
 
+/**
+ * World-space direction of a body-mounted sensor ray: the local ray
+ * (angleRad about the body Y axis, 0 = forward) rotated by the full body
+ * quaternion, so rays pitch/roll with the chassis on slopes.
+ */
+export function rayDirectionFromBody(
+  rotation: Quaternion,
+  angleRad: number,
+): Vector3 {
+  const local = { x: Math.sin(angleRad), y: 0, z: Math.cos(angleRad) }
+  const { x, y, z, w } = rotation
+  // q * v * q' via t = 2 * cross(q.xyz, v): v + w * t + cross(q.xyz, t).
+  const tx = 2 * (y * local.z - z * local.y)
+  const ty = 2 * (z * local.x - x * local.z)
+  const tz = 2 * (x * local.y - y * local.x)
+  return {
+    x: local.x + w * tx + (y * tz - z * ty),
+    y: local.y + w * ty + (z * tx - x * tz),
+    z: local.z + w * tz + (x * ty - y * tx),
+  }
+}
+
+/**
+ * Spawn heading that faces directly downhill (gradient descent). A rover that
+ * spawns facing a steep uphill can kickstand its front belly against the
+ * slope and lock; facing downhill the nose points away from the rise and the
+ * rover is always free to drive. Falls back when the ground is ~level.
+ */
+export function downhillYaw(
+  gradientX: number,
+  gradientZ: number,
+  fallbackYawRad = 0,
+  levelEpsilon = 0.02,
+): number {
+  const magnitude = Math.hypot(gradientX, gradientZ)
+  if (!(magnitude > levelEpsilon)) return fallbackYawRad
+  return Math.atan2(-gradientX / magnitude, -gradientZ / magnitude)
+}
+
+/**
+ * Highest terrain under the rover footprint (center + yaw-rotated wheel
+ * offsets), plus clearance. Spawning at center-height alone buries the
+ * uphill wheels on slopes, and Rapier's depenetration blast wedges or flips
+ * the body — the drop height must clear the whole footprint.
+ */
+export function footprintSpawnHeight(
+  sample: (x: number, z: number) => number,
+  x: number,
+  z: number,
+  yawRad: number,
+  wheelOffsets: ReadonlyArray<{ x: number; z: number }>,
+  clearance = 0.3,
+): number {
+  const cos = Math.cos(yawRad)
+  const sin = Math.sin(yawRad)
+  let max = sample(x, z)
+  for (const offset of wheelOffsets) {
+    const wx = x + offset.x * cos + offset.z * sin
+    const wz = z - offset.x * sin + offset.z * cos
+    max = Math.max(max, sample(wx, wz))
+  }
+  return max + clearance
+}
+
+/** Terrain gradient magnitude via central differences (rise per meter). */
+export function slopeMagnitude(
+  sample: (x: number, z: number) => number,
+  x: number,
+  z: number,
+  sampleDistance = 1.5,
+): number {
+  const gx =
+    (sample(x + sampleDistance, z) - sample(x - sampleDistance, z)) / (2 * sampleDistance)
+  const gz =
+    (sample(x, z + sampleDistance) - sample(x, z - sampleDistance)) / (2 * sampleDistance)
+  return Math.hypot(gx, gz)
+}
+
+export interface SpawnSite {
+  x: number
+  z: number
+  slope: number
+}
+
+/**
+ * Deterministic spiral search for a drivable spawn site near (startX, startZ):
+ * the closest candidate whose slope is at most maxSlope. Falls back to the
+ * gentlest site found when nothing is gentle enough within radius.
+ */
+export function findSpawnSite(
+  sample: (x: number, z: number) => number,
+  startX: number,
+  startZ: number,
+  maxSlope = 0.27,
+  radius = 30,
+  ringStep = 2,
+): SpawnSite {
+  const startSlope = slopeMagnitude(sample, startX, startZ)
+  if (startSlope <= maxSlope) return { x: startX, z: startZ, slope: startSlope }
+  let fallback: SpawnSite = { x: startX, z: startZ, slope: startSlope }
+  for (let r = ringStep; r <= radius; r += ringStep) {
+    const steps = Math.max(8, Math.floor(r * 4))
+    for (let i = 0; i < steps; i += 1) {
+      const angle = (i / steps) * 2 * Math.PI
+      const x = startX + Math.cos(angle) * r
+      const z = startZ + Math.sin(angle) * r
+      const slope = slopeMagnitude(sample, x, z)
+      if (slope < fallback.slope) fallback = { x, z, slope }
+      if (slope <= maxSlope) return { x, z, slope }
+    }
+  }
+  return fallback
+}
+
 /** Signed smallest angle from `from` to `to`, in [-PI, PI]. */
 export function angleDifference(fromRad: number, toRad: number): number {
   let diff = (toRad - fromRad) % (2 * Math.PI)
@@ -118,8 +232,13 @@ export function computeDrive(
   const throttle = canDrive ? (action.left + action.right) / 2 : 0
   const turn = canDrive ? (action.right - action.left) / 2 : 0
 
-  // Longitudinal drive along the heading, traction-limited.
-  let driveForce = throttle * config.maxDriveForce * 2
+  // Longitudinal drive along the heading: motor curve (force fades toward
+  // top speed, DC-motor back-EMF style) then the traction limit.
+  const vForward = ctx.velocity.x * forward.x + ctx.velocity.z * forward.z
+  const direction = Math.sign(throttle)
+  const curve =
+    direction === 0 ? 0 : Math.max(0, 1 - ((vForward * direction) / config.maxSpeed))
+  let driveForce = throttle * config.maxDriveForce * 2 * curve
   driveForce = Math.max(-tractionLimit, Math.min(tractionLimit, driveForce))
   const force: Vector3 = {
     x: forward.x * driveForce,
@@ -130,7 +249,6 @@ export function computeDrive(
   const torque: Vector3 = { x: 0, y: turn * config.maxYawTorque, z: 0 }
 
   // Lateral grip: oppose sideways slip, capped by remaining traction budget.
-  const vForward = ctx.velocity.x * forward.x + ctx.velocity.z * forward.z
   const slipX = ctx.velocity.x - forward.x * vForward
   const slipZ = ctx.velocity.z - forward.z * vForward
   const gripBudget = Math.max(tractionLimit - Math.abs(driveForce), 0)
@@ -282,22 +400,33 @@ export function navigationReward(
 /** Proportional heading law with clearance-scaled throttle (baseline autonomy). */
 export function headingControlAction(
   yawRad: number,
+  yawRateRadS: number,
   targetBearingRad: number,
   minForwardRange: number,
   arrived: boolean,
-  gains: { heading: number; maxTurn: number; cruise: number },
+  gains: { heading: number; yawDamping: number; maxTurn: number; cruise: number },
 ): DriveAction {
   if (arrived) {
     return { left: 0, right: 0, brake: true, eStop: false }
   }
   const error = angleDifference(yawRad, targetBearingRad)
-  const turn = Math.max(-gains.maxTurn, Math.min(gains.maxTurn, error * gains.heading))
+  // PD on heading: the D term kills spin-in-place overshoot (near-critical
+  // damping for the stock chassis/torque), and the spin gate withholds
+  // forward drive while rotating fast so the rover never drunk-drives.
+  const turn = Math.max(
+    -gains.maxTurn,
+    Math.min(gains.maxTurn, error * gains.heading - yawRateRadS * gains.yawDamping),
+  )
   const clearance = Math.max(0, Math.min(1, minForwardRange / 4))
-  const throttle = gains.cruise * clearance * Math.max(0, Math.cos(error))
+  const spinGate = Math.max(0, 1 - Math.abs(yawRateRadS) / 2)
+  const throttle = gains.cruise * clearance * Math.max(0, Math.cos(error)) * spinGate
+  // Brake-turn on large errors: without it the free-rolling wheels let the
+  // rover slide downhill while spinning in place on slopes.
+  const brakeTurn = Math.abs(error) > 1.2
   return {
     left: Math.max(-1, Math.min(1, throttle - turn)),
     right: Math.max(-1, Math.min(1, throttle + turn)),
-    brake: false,
+    brake: brakeTurn,
     eStop: false,
   }
 }

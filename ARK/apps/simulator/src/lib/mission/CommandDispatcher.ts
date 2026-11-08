@@ -1,5 +1,5 @@
-import type { StartEventSpec } from '../environment/EnvironmentController'
-import type { PlanetId } from '../worlds/PlanetConfig'
+import type { StartEventSpec } from '../../../../../packages/physics/src/environment/EnvironmentController'
+import type { PlanetId } from '../../../../../packages/physics/src/worlds/PlanetConfig'
 import type {
   AuditRecord,
   CommandResult,

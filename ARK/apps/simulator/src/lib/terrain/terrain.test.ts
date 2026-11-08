@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { getPlanet, resolveTerrainParams } from '../worlds/planetPresets'
+import { getPlanet, resolveTerrainParams } from '../../../../../packages/physics/src/worlds/planetPresets'
 import { createTerrainGeometry } from './createTerrainGeometry'
-import { deriveCraters, generateHeightfield } from './generateHeightfield'
-import { makeTerrainColorFn } from './terrainMaterials'
-import { getTerrainHeight } from './terrainSampling'
+import { deriveCraters, generateHeightfield } from '../../../../../packages/physics/src/terrain/generateHeightfield'
+import { makeTerrainColorFn } from '../../../../../packages/physics/src/terrain/terrainMaterials'
+import { getTerrainHeight } from '../../../../../packages/physics/src/terrain/terrainSampling'
 
 const EARTH_PARAMS = resolveTerrainParams(getPlanet('earth'))
 

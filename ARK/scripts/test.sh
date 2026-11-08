@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # ARK verification gates in one command.
 #
-# Usage: ./scripts/test.sh [all|backend|web]
-#   all      backend pytest + web tests + typecheck + production build (default)
+# Usage: ./scripts/test.sh [all|backend|web|headless]
+#   all      backend pytest + web tests + typecheck + production build + headless (default)
 #   backend  Python agent tests only (fast)
 #   web      simulator tests + typecheck + build
+#   headless headless sim determinism gate only (fast)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -51,9 +52,21 @@ case "$TARGET" in
 esac
 
 case "$TARGET" in
-  all | backend | web) ;;
+  headless | all)
+    need npm
+    need node
+    if [ ! -d "$ROOT/node_modules" ]; then
+      (cd "$ROOT" && npm install)
+    fi
+    section "headless: determinism gate (sim:headless)"
+    (cd "$ROOT" && npm run sim:headless -- --planet mars --seed 42 --steps 300 --check-determinism) || failures=$((failures + 1))
+    ;;
+esac
+
+case "$TARGET" in
+  all | backend | web | headless) ;;
   *)
-    echo "error: unknown target '$TARGET' (expected all|backend|web)." >&2
+    echo "error: unknown target '$TARGET' (expected all|backend|web|headless)." >&2
     exit 2
     ;;
 esac

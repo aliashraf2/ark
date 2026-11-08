@@ -1,11 +1,9 @@
 import type RAPIER from '@dimforge/rapier3d-compat'
-import type * as THREE from 'three'
 
-import type { Vector3 } from '../types/SimulationTypes'
-import { goalDistanceXZ } from './RoverDynamics'
-import { resolveRoverConfig, type RoverConfigOverrides, type RoverSnapshot } from './RoverConfig'
+import type { Quaternion, Vector3 } from '../types/SimulationTypes'
+import { footprintSpawnHeight, goalDistanceXZ } from './RoverDynamics'
+import { resolveRoverConfig, type RoverConfig, type RoverConfigOverrides, type RoverSnapshot } from './RoverConfig'
 import { Rover, type RoverSpawn } from './Rover'
-import { RoverView } from './RoverView'
 import { MissionManager, type MissionBounds, type NavigationMission } from './MissionManager'
 import {
   ManualController,
@@ -24,6 +22,28 @@ export interface WorldChangeSampler {
   halfExtent: number
 }
 
+/**
+ * Structural view contract (implemented by the Three.js RoverView in the
+ * browser adapter). Headless runtimes pass no factory and get no views,
+ * so this module never imports Three.js.
+ */
+export interface RobotView {
+  readonly group: unknown
+  snap(position: Vector3, rotation: Quaternion): void
+  push(position: Vector3, rotation: Quaternion): void
+  sync(alpha: number, rover: Rover): void
+  setRaysVisible(visible: boolean): void
+  dispose(): void
+}
+
+export type RoverViewFactory = (accentColor: number, config: RoverConfig) => RobotView
+
+/** Structural scene contract: add/remove only. */
+export interface RobotScene {
+  add(object: unknown): void
+  remove(object: unknown): void
+}
+
 const ROVER_COLORS = [0x35d0ff, 0xffb02e, 0x7dff6a, 0xff6a8a, 0xc9a6ff, 0x8a8f9e]
 
 /**
@@ -37,15 +57,17 @@ export class RobotManager {
   public readonly missions = new MissionManager()
 
   private readonly world: RAPIER.World
-  private readonly scene: THREE.Scene | null
+  private readonly scene: RobotScene | null
+  private readonly viewFactory: RoverViewFactory | null
   private readonly rovers = new Map<string, Rover>()
   private readonly controllers = new Map<string, Controller>()
-  private readonly views = new Map<string, RoverView>()
+  private readonly views = new Map<string, RobotView>()
   private sequence = 0
 
-  constructor(world: RAPIER.World, scene: THREE.Scene | null = null) {
+  constructor(world: RAPIER.World, scene: RobotScene | null = null, viewFactory?: RoverViewFactory) {
     this.world = world
     this.scene = scene
+    this.viewFactory = viewFactory ?? null
   }
 
   public get count(): number {
@@ -77,8 +99,11 @@ export class RobotManager {
     const rover = new Rover(this.world, id, config, spawn, seed ?? this.sequence * 7919)
     this.rovers.set(id, rover)
     this.controllers.set(id, new ManualController())
-    if (this.scene) {
-      const view = new RoverView(ROVER_COLORS[(this.sequence - 1) % ROVER_COLORS.length] ?? 0x35d0ff)
+    if (this.scene && this.viewFactory) {
+      const view = this.viewFactory(
+        ROVER_COLORS[(this.sequence - 1) % ROVER_COLORS.length] ?? 0x35d0ff,
+        config,
+      )
       view.snap(rover.position, rover.rotation)
       this.scene.add(view.group)
       this.views.set(id, view)
@@ -108,6 +133,7 @@ export class RobotManager {
     for (const [id, rover] of this.rovers) {
       const controller = this.controllers.get(id)
       if (!controller) continue
+      rover.updateYawRate(env.dt)
       const input = this.controlInputFor(id, rover)
       const action = controller.update(input, env.dt)
       rover.applyAction(action, { gravityMps2: env.gravityMps2, traction: env.traction, dt: env.dt })
@@ -134,6 +160,7 @@ export class RobotManager {
     return {
       position: rover.position,
       yawRad: rover.yawRad,
+      yawRateRadS: rover.yawRate,
       speed: rover.inertial.speed,
       ranges: rover.ranges,
       target,
@@ -187,7 +214,14 @@ export class RobotManager {
       const position = rover.position
       const x = Math.max(-sampler.halfExtent + 2, Math.min(sampler.halfExtent - 2, position.x))
       const z = Math.max(-sampler.halfExtent + 2, Math.min(sampler.halfExtent - 2, position.z))
-      rover.reset({ position: { x, y: sampler.surfaceY(x, z) + 0.05, z }, yawRad: 0 }, seed)
+      const dropY = footprintSpawnHeight(
+        sampler.surfaceY,
+        x,
+        z,
+        0,
+        rover.config.wheelOffsets,
+      )
+      rover.reset({ position: { x, y: dropY, z }, yawRad: 0 }, seed)
       this.controllers.get(id)?.reset()
       const mission = this.missions.missionForRover(id)
       if (mission) this.missions.resetMission(mission.id)

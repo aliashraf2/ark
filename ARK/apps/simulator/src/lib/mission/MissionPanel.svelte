@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte'
 
   import type { SimulationEngine } from '../core/SimulationEngine'
-  import type { PlanetId } from '../worlds/PlanetConfig'
+  import type { PlanetId } from '../../../../../packages/physics/src/worlds/PlanetConfig'
   import { CommandDispatcher } from './CommandDispatcher'
   import {
     MissionClient,
