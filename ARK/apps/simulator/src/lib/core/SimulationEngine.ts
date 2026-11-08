@@ -1,22 +1,28 @@
 import * as THREE from 'three'
 
-import type { SimulationStatus, TelemetryState } from '../types/SimulationTypes'
+import type { SimulationStatus, TelemetryState, Vector3 } from '../types/SimulationTypes'
+import { surfaceAt } from '../environment/SurfaceSystem'
 import { PhysicsWorld } from '../physics/PhysicsWorld'
 import { CameraController } from '../rendering/CameraController'
 import { SceneManager } from '../rendering/SceneManager'
+import type { PlanetConfig, PlanetId } from '../worlds/PlanetConfig'
+import { EnvironmentManager, SPAWN_CLEARANCE, type EnvironmentInfo } from './EnvironmentManager'
 import { SimulationClock } from './SimulationClock'
 
 /**
  * Owns the frame loop: fixed-step physics via an accumulator, interpolated
  * rendering (Rapier state is never modified by interpolation), and throttled telemetry.
+ * Planet lifecycle (terrain, gravity, lighting) is delegated to the EnvironmentManager.
  */
 export class SimulationEngine {
   public readonly physicsWorld: PhysicsWorld
   public readonly sceneManager: SceneManager
+  public readonly environment: EnvironmentManager
 
   private readonly clock = new SimulationClock()
   private readonly cameraController: CameraController
   private readonly telemetryCallback?: (state: TelemetryState) => void
+  private readonly environmentCallback?: (info: EnvironmentInfo) => void
   private readonly container: HTMLElement
   private readonly telemetryIntervalMs = 100
 
@@ -31,10 +37,16 @@ export class SimulationEngine {
   private currentStatus: SimulationStatus = 'running'
   private lastTelemetryEmit = 0
   private destroyRequested = false
+  private lastConfig: PlanetConfig | null = null
 
-  constructor(container: HTMLElement, telemetryCallback?: (state: TelemetryState) => void) {
+  constructor(
+    container: HTMLElement,
+    telemetryCallback?: (state: TelemetryState) => void,
+    environmentCallback?: (info: EnvironmentInfo) => void,
+  ) {
     this.container = container
     this.telemetryCallback = telemetryCallback
+    this.environmentCallback = environmentCallback
 
     this.sceneManager = new SceneManager(container)
     this.cameraController = new CameraController(
@@ -42,12 +54,14 @@ export class SimulationEngine {
       this.sceneManager.renderer.domElement,
     )
     this.physicsWorld = new PhysicsWorld()
+    this.environment = new EnvironmentManager(this.physicsWorld, this.sceneManager, {
+      pause: () => this.pauseForSwitch(),
+      resume: () => this.resume(),
+      resetClock: () => this.clock.reset(),
+      refresh: (spawn, config) => this.refreshAfterSwitch(spawn, config),
+    })
 
-    this.snapshotPhysicsState()
-    this.sceneManager.syncSphere(
-      this.physicsWorld.spherePosition,
-      this.physicsWorld.sphereRotation,
-    )
+    this.environment.switchPlanet('earth')
     this.handleResize()
     this.publishTelemetry(0)
 
@@ -56,6 +70,10 @@ export class SimulationEngine {
 
   public get status(): SimulationStatus {
     return this.currentStatus
+  }
+
+  public get environmentInfo(): EnvironmentInfo {
+    return this.environment.info
   }
 
   public start(): void {
@@ -108,7 +126,7 @@ export class SimulationEngine {
 
   public reset(): void {
     this.clock.reset()
-    this.physicsWorld.resetSphere()
+    this.physicsWorld.resetSphere(this.environment.spawnPoint)
     this.snapshotPhysicsState()
     this.renderInterpolated()
     this.publishTelemetry(this.lastTelemetryEmit + this.telemetryIntervalMs)
@@ -116,11 +134,31 @@ export class SimulationEngine {
 
   public drop(): void {
     this.clock.reset()
-    this.physicsWorld.resetSphere()
+    this.physicsWorld.resetSphere(this.environment.spawnPoint)
     this.currentStatus = 'running'
     this.snapshotPhysicsState()
     this.renderInterpolated()
     this.publishTelemetry(this.lastTelemetryEmit + this.telemetryIntervalMs)
+  }
+
+  public switchPlanet(planet: PlanetId): void {
+    const info = this.environment.switchPlanet(planet)
+    this.environmentCallback?.(info)
+  }
+
+  public regenerateTerrain(seed?: number): void {
+    const info = this.environment.regenerate(seed)
+    this.environmentCallback?.(info)
+  }
+
+  public setTerrainProfile(profileId: string): void {
+    const info = this.environment.setProfile(profileId)
+    this.environmentCallback?.(info)
+  }
+
+  public resetWorld(): void {
+    const info = this.environment.resetWorld()
+    this.environmentCallback?.(info)
   }
 
   public setDebugMode(enabled: boolean): void {
@@ -142,6 +180,34 @@ export class SimulationEngine {
     this.cameraController.dispose()
     this.sceneManager.dispose()
     this.physicsWorld.dispose()
+  }
+
+  private pauseForSwitch(): boolean {
+    const wasRunning = this.currentStatus === 'running'
+    this.currentStatus = 'paused'
+    return wasRunning
+  }
+
+  private refreshAfterSwitch(spawn: Vector3, config: PlanetConfig): void {
+    this.lastConfig = config
+    const groundY = spawn.y - SPAWN_CLEARANCE
+    const target = { x: spawn.x, y: groundY + config.camera.targetHeight, z: spawn.z }
+    this.cameraController.frame(
+      {
+        x: target.x + config.camera.offset.x,
+        y: target.y + config.camera.offset.y,
+        z: target.z + config.camera.offset.z,
+      },
+      target,
+    )
+    this.cameraController.setLimits(
+      config.camera.minDistance,
+      config.camera.maxDistance,
+      config.camera.maxPolarAngle,
+    )
+    this.snapshotPhysicsState()
+    this.renderInterpolated()
+    this.publishTelemetry(this.lastTelemetryEmit + this.telemetryIntervalMs)
   }
 
   private readonly handleResize = (): void => {
@@ -194,9 +260,15 @@ export class SimulationEngine {
       velocityY: this.physicsWorld.sphereVelocityY,
       gravity: this.physicsWorld.gravity,
       status: this.currentStatus,
+      surface: this.surfaceUnderSphere(position),
     }
 
     this.lastTelemetryEmit = timestamp
     this.telemetryCallback?.(telemetry)
+  }
+
+  private surfaceUnderSphere(position: Vector3): string {
+    if (!this.lastConfig) return '—'
+    return surfaceAt(this.environment.heightfield, this.lastConfig.surfaceRules, position.x, position.z).label
   }
 }

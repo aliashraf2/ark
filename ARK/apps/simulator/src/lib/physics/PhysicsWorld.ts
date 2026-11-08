@@ -1,6 +1,8 @@
 import RAPIER from '@dimforge/rapier3d-compat'
 
 import { RigidBodyFactory } from './RigidBodyFactory'
+import { createTerrainBody } from '../terrain/createTerrainCollider'
+import type { Heightfield } from '../terrain/generateHeightfield'
 import type { PhysicsConfig, Quaternion, Vector3 } from '../types/SimulationTypes'
 import { DEFAULT_PHYSICS_CONFIG, FIXED_TIME_STEP } from '../types/SimulationTypes'
 
@@ -22,7 +24,7 @@ export class PhysicsWorld {
   public readonly config: PhysicsConfig
   public readonly world: RAPIER.World
 
-  private readonly groundBody: RAPIER.RigidBody
+  private staticBody: RAPIER.RigidBody
   private readonly sphereBody: RAPIER.RigidBody
   private readonly initialSpherePosition: Vector3
 
@@ -48,8 +50,36 @@ export class PhysicsWorld {
 
     this.initialSpherePosition = { ...this.config.sphereInitialPosition }
 
-    this.groundBody = RigidBodyFactory.createGround(this.world, this.config)
+    this.staticBody = RigidBodyFactory.createGround(this.world, this.config)
     this.sphereBody = RigidBodyFactory.createSphere(this.world, this.config)
+  }
+
+  /**
+   * Changes gravity live (m/s^2 magnitude, applied along -Y). The Rapier
+   * pipeline reads world.gravity each step, so no world rebuild is needed.
+   */
+  public setGravity(magnitude: number): void {
+    this.gravity.y = -magnitude
+    this.config.gravity.y = -magnitude
+    this.world.gravity.y = -magnitude
+  }
+
+  /**
+   * Replaces the static ground (flat plane or previous terrain) with a new
+   * terrain collider over the given heightfield. Exactly one static body
+   * exists at any time: the old body and its colliders are removed first.
+   */
+  public setTerrain(heightfield: Heightfield, friction: number, restitution: number): void {
+    this.world.removeRigidBody(this.staticBody)
+    this.staticBody = createTerrainBody(this.world, heightfield, { friction, restitution })
+  }
+
+  public get bodyCount(): number {
+    return this.world.bodies.len()
+  }
+
+  public get colliderCount(): number {
+    return this.world.colliders.len()
   }
 
   public step(dt: number = FIXED_TIME_STEP): void {
@@ -91,7 +121,7 @@ export class PhysicsWorld {
   }
 
   public get groundBodyReference(): RAPIER.RigidBody {
-    return this.groundBody
+    return this.staticBody
   }
 
   public dispose(): void {

@@ -1,23 +1,30 @@
 import * as THREE from 'three'
 
-import { Ground } from '../objects/Ground'
+import { LightingSystem } from '../environment/LightingSystem'
 import { Sphere } from '../objects/Sphere'
 import type { Quaternion, Vector3 } from '../types/SimulationTypes'
 import { DEFAULT_PHYSICS_CONFIG } from '../types/SimulationTypes'
+import type { PlanetConfig } from '../worlds/PlanetConfig'
 
 export class SceneManager {
   public readonly scene = new THREE.Scene()
   public readonly camera: THREE.PerspectiveCamera
   public readonly renderer: THREE.WebGLRenderer
-  public readonly ground: Ground
   public readonly sphere: Sphere
+  public readonly lighting = new LightingSystem()
 
+  private readonly terrainMaterial = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.95,
+    metalness: 0,
+  })
+  private terrainMesh: THREE.Mesh<THREE.BufferGeometry, typeof this.terrainMaterial> | null = null
   private readonly axesHelper = new THREE.AxesHelper(2)
   private debugMode = false
 
   constructor(container: HTMLElement) {
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200)
-    this.camera.position.set(7, 5, 10)
+    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000)
+    this.camera.position.set(18, 16, 24)
     this.camera.lookAt(0, 1, 0)
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
@@ -28,28 +35,12 @@ export class SceneManager {
 
     container.appendChild(this.renderer.domElement)
 
+    // Neutral defaults; EnvironmentManager applies the planet preset on load.
     this.scene.background = new THREE.Color(0x050b14)
-    this.scene.fog = new THREE.Fog(0x050b14, 12, 42)
+    this.scene.fog = new THREE.Fog(0x050b14, 90, 420)
+    this.lighting.attach(this.scene)
 
-    const hemiLight = new THREE.HemisphereLight(0xcfe8ff, 0x0d1720, 1.3)
-    this.scene.add(hemiLight)
-
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.4)
-    dirLight.position.set(6, 12, 4)
-    dirLight.castShadow = true
-    dirLight.shadow.mapSize.set(2048, 2048)
-    dirLight.shadow.camera.left = -20
-    dirLight.shadow.camera.right = 20
-    dirLight.shadow.camera.top = 20
-    dirLight.shadow.camera.bottom = -20
-    dirLight.shadow.camera.near = 0.1
-    dirLight.shadow.camera.far = 40
-    this.scene.add(dirLight)
-
-    this.ground = new Ground()
     this.sphere = new Sphere(DEFAULT_PHYSICS_CONFIG.sphereRadius)
-
-    this.scene.add(this.ground.mesh)
     this.scene.add(this.sphere.mesh)
 
     this.axesHelper.position.set(0, 0.01, 0)
@@ -79,6 +70,25 @@ export class SceneManager {
     }
   }
 
+  /**
+   * Swaps the active terrain mesh. The previous geometry is disposed; the
+   * material is shared across planets (colors live in vertices).
+   */
+  public setTerrainGeometry(geometry: THREE.BufferGeometry): void {
+    if (this.terrainMesh) {
+      this.scene.remove(this.terrainMesh)
+      this.terrainMesh.geometry.dispose()
+    }
+    this.terrainMesh = new THREE.Mesh(geometry, this.terrainMaterial)
+    this.terrainMesh.receiveShadow = true
+    this.terrainMesh.castShadow = false
+    this.scene.add(this.terrainMesh)
+  }
+
+  public applyEnvironment(config: PlanetConfig): void {
+    this.lighting.apply(config, this.scene)
+  }
+
   public setDebugMode(enabled: boolean): void {
     this.debugMode = enabled
     this.axesHelper.visible = enabled
@@ -90,7 +100,12 @@ export class SceneManager {
   }
 
   public dispose(): void {
-    this.ground.dispose()
+    if (this.terrainMesh) {
+      this.scene.remove(this.terrainMesh)
+      this.terrainMesh.geometry.dispose()
+      this.terrainMesh = null
+    }
+    this.terrainMaterial.dispose()
     this.sphere.dispose()
     this.axesHelper.dispose()
     this.renderer.dispose()

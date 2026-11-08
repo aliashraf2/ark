@@ -53,4 +53,6 @@ export interface TelemetryState {
   velocityY: number
   gravity: Vector3
   status: SimulationStatus
+  /** Surface material under the sphere, e.g. "Regolith". */
+  surface: string
 }

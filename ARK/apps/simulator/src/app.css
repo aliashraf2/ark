@@ -158,6 +158,84 @@ button.secondary {
   background: rgba(17, 27, 42, 0.8);
 }
 
+button.active {
+  border-color: rgba(123, 211, 255, 0.65);
+  background: linear-gradient(180deg, rgba(123, 211, 255, 0.32), rgba(74, 123, 179, 0.2));
+}
+
+.planet-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.9rem;
+}
+
+.env-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.env-list div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+}
+
+.env-list dt {
+  color: var(--soft-text);
+  font-weight: 500;
+}
+
+.env-list dd {
+  margin: 0;
+  color: #f2fbff;
+  text-align: right;
+}
+
+.field-label {
+  display: block;
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  color: var(--soft-text);
+}
+
+.profile-select,
+.seed-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 0.7rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--panel-border);
+  background: rgba(17, 27, 42, 0.9);
+  color: #edf6ff;
+}
+
+.seed-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: start;
+}
+
+.seed-row .seed-input {
+  margin-bottom: 0;
+}
+
+.seed-row button {
+  padding: 0.6rem 0.8rem;
+  white-space: nowrap;
+}
+
+.button-row.two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.7rem;
+  margin-bottom: 0;
+}
+
 .debug-toggle {
   display: inline-flex;
   align-items: center;
