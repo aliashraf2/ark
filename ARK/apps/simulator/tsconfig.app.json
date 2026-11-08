@@ -17,5 +17,5 @@
     "checkJs": true,
     "moduleDetection": "force"
   },
-  "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte", "../../packages/physics/src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte", "../../packages/physics/src/**/*.ts", "../../packages/rl/src/**/*.ts", "../../services/training/bridge/**/*.ts"]
 }

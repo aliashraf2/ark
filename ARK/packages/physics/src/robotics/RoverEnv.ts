@@ -10,12 +10,14 @@ import { ExternalController } from './controllers'
 import type { MissionBounds } from './MissionManager'
 import { RobotManager } from './RobotManager'
 import {
+  bodyUpY,
   buildObservation,
   downhillYaw,
   findSpawnSite,
   footprintSpawnHeight,
   goalDistanceXZ,
   navigationReward,
+  ROLLOVER_UP_THRESHOLD,
   type RewardTerms,
 } from './RoverDynamics'
 import type { DriveAction, RoverConfigOverrides, RoverObservation } from './RoverConfig'
@@ -61,9 +63,36 @@ export interface EnvStepResult {
   truncated: boolean
   info: {
     missionStatus: string
+    /** Mission failure reason when status is 'failed' ('time-limit' | 'out-of-bounds' | 'aborted'). */
+    missionFailReason: string | null
     distanceM: number
     batteryPercent: number
     steps: number
+    /** Current rover position (ground-truth simulation state, for metrics). */
+    position: Vector3
+    /** Body up-axis Y: 1 upright, < ROLLOVER_UP_THRESHOLD means rolled over. */
+    upY: number
+    /** Raw energy consumed this step, Joules (before reward weighting). */
+    energyJ: number
+  }
+}
+
+/** Physics settle steps applied after every reset (braked drop onto terrain). */
+export const SETTLE_STEPS = 30
+
+/** Explicit scenario overrides for reset; omitted fields keep the sampler. */
+export interface EnvResetOptions {
+  start?: { x: number; z: number }
+  target?: { x: number; z: number }
+}
+
+export interface EnvResetResult {
+  observation: RoverObservation
+  info: {
+    /** Spawn actually used (post gentle-site search), terrain XZ. */
+    start: { x: number; z: number }
+    /** Goal actually used, terrain XZ. */
+    target: { x: number; z: number }
   }
 }
 
@@ -77,9 +106,9 @@ export interface EnvStepResult {
  * within one runtime. Cross-platform bit-identical physics is NOT claimed.
  */
 export class RoverEnv {
-  private readonly world: RAPIER.World
-  private readonly manager: RobotManager
-  private readonly roverId: string
+  private world: RAPIER.World
+  private manager: RobotManager
+  private roverId: string
   private readonly config: Required<Omit<RoverEnvConfig, 'heightfield' | 'rover' | 'rewardWeights'>> & {
     heightfield: Heightfield
     rewardWeights: EnvRewardWeights
@@ -91,6 +120,7 @@ export class RoverEnv {
   private missionId: string | null = null
   private previousDistance = 0
   private stepCount = 0
+  private physicsStepCount = 0
   private lastReward = 0
   private random: () => number = mulberry32(1)
 
@@ -107,6 +137,23 @@ export class RoverEnv {
       toleranceM: config.toleranceM ?? 2,
       rover: config.rover ?? {},
     }
+    this.external = new ExternalController(() => this.pendingAction)
+    // Dummy spawn: the first reset() rebuilds the world at the real spawn.
+    // Definite assignment via buildWorld (constructor cannot call reset()).
+    this.world = null as unknown as RAPIER.World
+    this.manager = null as unknown as RobotManager
+    this.roverId = ''
+    this.buildWorld({ position: { x: 0, y: 50, z: 0 }, yawRad: 0 }, 1)
+  }
+
+  /**
+   * (Re)builds the Rapier world: terrain collider, manager, and one rover.
+   * Every reset rebuilds from scratch because engine-internal history
+   * (broad-phase pair ordering, contact caches) survives teleport + velocity
+   * zeroing and makes reset;step;reset diverge. Identical build sequence
+   * yields identical engine state, restoring determinism.
+   */
+  private buildWorld(spawn: { position: { x: number; y: number; z: number }; yawRad: number }, seed: number): void {
     this.world = new RAPIER.World({ x: 0, y: -this.config.gravityMps2, z: 0 })
     this.world.timestep = FIXED_TIME_STEP
     createTerrainBody(this.world, this.config.heightfield, {
@@ -114,13 +161,13 @@ export class RoverEnv {
       restitution: 0.05,
     })
     this.manager = new RobotManager(this.world, null)
-    this.external = new ExternalController(() => this.pendingAction)
-    this.roverId = this.manager.spawn(
-      { position: { x: 0, y: 50, z: 0 }, yawRad: 0 },
-      this.config.rover,
-      1,
-    )
+    this.roverId = this.manager.spawn(spawn, this.config.rover, seed)
     this.manager.setController(this.roverId, this.external)
+  }
+
+  private destroyWorld(): void {
+    this.manager.dispose()
+    this.world.free()
   }
 
   private get rover(): NonNullable<ReturnType<RobotManager['get']>> {
@@ -133,40 +180,49 @@ export class RoverEnv {
     return this.config.terrainFriction * this.config.tractionMultiplier
   }
 
-  /** Resets rover, mission, and RNG streams. Returns the initial observation. */
-  public reset(seed: number): { observation: RoverObservation } {
+  /**
+   * Resets rover, mission, and RNG streams. Returns the initial observation
+   * plus the scenario actually used. Explicit start/target overrides skip the
+   * sampler (the start still goes through the gentle-site search).
+   */
+  public reset(seed: number, options: EnvResetOptions = {}): EnvResetResult {
     this.random = mulberry32(seed)
     const margin = this.config.bounds.halfExtent - 5
-    const start = this.samplePoint(margin)
-    let target = this.samplePoint(margin)
-    for (let attempt = 0; attempt < 16 && goalDistanceXZ(start, target) < 15; attempt += 1) {
-      target = this.samplePoint(margin)
+    const startXZ = options.start ?? this.sampleXZ(margin)
+    let targetXZ = options.target ?? this.sampleXZ(margin)
+    if (!options.target) {
+      for (
+        let attempt = 0;
+        attempt < 16 && Math.hypot(targetXZ.x - startXZ.x, targetXZ.z - startXZ.z) < 15;
+        attempt += 1
+      ) {
+        targetXZ = this.sampleXZ(margin)
+      }
     }
     const heightfield = this.config.heightfield
     const sample = (sx: number, sz: number) => getTerrainHeight(heightfield, sx, sz)
-    const site = findSpawnSite(sample, start.x, start.z)
+    const target = { x: targetXZ.x, y: sample(targetXZ.x, targetXZ.z) + 0.1, z: targetXZ.z }
+    const site = findSpawnSite(sample, startXZ.x, startXZ.z)
     const yaw = downhillYaw(
       (sample(site.x + 1.5, site.z) - sample(site.x - 1.5, site.z)) / 3,
       (sample(site.x, site.z + 1.5) - sample(site.x, site.z - 1.5)) / 3,
       this.random() * 2 * Math.PI,
     )
-    this.rover.reset(
-      {
-        position: {
-          x: site.x,
-          y: footprintSpawnHeight(sample, site.x, site.z, yaw, this.rover.config.wheelOffsets),
-          z: site.z,
-        },
-        yawRad: yaw,
-      },
-      seed,
-    )
+    // Fresh world every episode (see buildWorld): teleports leak history.
+    const spawnPosition = {
+      x: site.x,
+      y: footprintSpawnHeight(sample, site.x, site.z, yaw, this.rover.config.wheelOffsets),
+      z: site.z,
+    }
+    this.destroyWorld()
+    this.buildWorld({ position: spawnPosition, yawRad: yaw }, seed)
+    this.pendingAction = { ...NEUTRAL_ACTION }
     // Settle onto the terrain before the mission starts.
-    for (let i = 0; i < 30; i += 1) {
+    for (let i = 0; i < SETTLE_STEPS; i += 1) {
       this.rover.applyAction({ ...NEUTRAL_ACTION, brake: true }, this.stepEnv(FIXED_TIME_STEP))
       this.world.step()
     }
-    if (this.missionId) this.manager.missions.resetMission(this.missionId)
+    // The manager is fresh, so no previous mission can leak; create directly.
     const mission = this.manager.missions.create(
       this.roverId,
       this.rover.position,
@@ -178,9 +234,13 @@ export class RoverEnv {
     this.manager.missions.start(mission.id)
     this.previousDistance = goalDistanceXZ(this.rover.position, target)
     this.stepCount = 0
+    this.physicsStepCount = SETTLE_STEPS
     this.lastReward = 0
     this.rover.senseRanges()
-    return { observation: this.getObservation() }
+    return {
+      observation: this.getObservation(),
+      info: { start: { x: site.x, z: site.z }, target: { x: targetXZ.x, z: targetXZ.z } },
+    }
   }
 
   /** Advances the environment by actionRepeat physics steps under one action. */
@@ -195,6 +255,7 @@ export class RoverEnv {
       })
       this.world.step()
     }
+    this.physicsStepCount += this.config.actionRepeat
     this.manager.postStep(dt, this.config.bounds)
     const settled = this.missionId ? this.manager.missions.get(this.missionId) : null
     const target = settled?.target ?? { x: 0, y: 0, z: 0 }
@@ -202,11 +263,12 @@ export class RoverEnv {
     const ranges = this.rover.ranges
     const minRange = ranges.length > 0 ? Math.min(...ranges.map((r) => r.distance)) : 99
     const success = settled?.status === 'succeeded'
+    const energyJ = this.rover.lastPowerDrawW * dt
     const terms = navigationReward(
       this.previousDistance,
       distance,
       minRange,
-      this.rover.lastPowerDrawW * dt,
+      energyJ,
       dt,
       success,
       this.config.rewardWeights,
@@ -214,7 +276,8 @@ export class RoverEnv {
     this.previousDistance = distance
     this.stepCount += 1
     this.lastReward = terms.total
-    const terminated = success || this.rover.depleted
+    const upY = bodyUpY(this.rover.rotation)
+    const terminated = success || this.rover.depleted || upY < ROLLOVER_UP_THRESHOLD
     const truncated =
       !terminated && (settled?.status === 'failed' || settled == null)
     return {
@@ -225,9 +288,13 @@ export class RoverEnv {
       truncated,
       info: {
         missionStatus: settled?.status ?? 'none',
+        missionFailReason: settled?.failReason ?? null,
         distanceM: distance,
         batteryPercent: this.rover.battery().percent,
         steps: this.stepCount,
+        position: { ...this.rover.position },
+        upY,
+        energyJ,
       },
     }
   }
@@ -251,9 +318,18 @@ export class RoverEnv {
     return this.lastReward
   }
 
+  /** Total Rapier steps advanced this episode, including the reset settle. */
+  public get physicsSteps(): number {
+    return this.physicsStepCount
+  }
+
   public isTerminated(): boolean {
     const mission = this.missionId ? this.manager.missions.get(this.missionId) : null
-    return mission?.status === 'succeeded' || this.rover.depleted
+    return (
+      mission?.status === 'succeeded' ||
+      this.rover.depleted ||
+      bodyUpY(this.rover.rotation) < ROLLOVER_UP_THRESHOLD
+    )
   }
 
   public isTruncated(): boolean {
@@ -263,17 +339,16 @@ export class RoverEnv {
   }
 
   public dispose(): void {
-    this.manager.dispose()
-    this.world.free()
+    this.destroyWorld()
   }
 
   private stepEnv(dt: number): { gravityMps2: number; traction: number; dt: number } {
     return { gravityMps2: this.config.gravityMps2, traction: this.traction, dt }
   }
 
-  private samplePoint(margin: number): Vector3 {
+  private sampleXZ(margin: number): { x: number; z: number } {
     const x = (this.random() * 2 - 1) * margin
     const z = (this.random() * 2 - 1) * margin
-    return { x, y: getTerrainHeight(this.config.heightfield, x, z) + 0.1, z }
+    return { x, z }
   }
 }

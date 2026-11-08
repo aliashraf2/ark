@@ -1,0 +1,10 @@
+{
+  "name": "@ark/rl",
+  "version": "0.1.0",
+  "description": "ARK Gymnasium-style RL environment API over the shared physics core. Imported relatively (no build step).",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "vitest": "^5.1.0"
+  }
+}

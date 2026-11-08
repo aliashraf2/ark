@@ -6,9 +6,14 @@
   "type": "module",
   "workspaces": [
     "apps/simulator",
-    "packages/physics"
+    "packages/physics",
+    "packages/rl"
   ],
   "scripts": {
+    "bridge:smoke": "uv run --project services/training/python --group dev services/training/python/examples/smoke_test.py",
+    "bridge:test": "uv run --project services/training/python --group dev pytest -q services/training/python/tests --rootdir services/training/python",
+    "rl:benchmark": "tsx services/training/benchmark/rlBenchmark.ts",
+    "rl:smoke": "tsx services/training/examples/randomAgent.ts",
     "sim:headless": "tsx services/training/headless/main.ts",
     "simulator": "npm --workspace apps/simulator run dev",
     "test": "npm --workspace apps/simulator run test"

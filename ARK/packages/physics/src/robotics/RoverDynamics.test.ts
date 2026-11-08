@@ -8,6 +8,7 @@ import {
   addGaussianNoise,
   angleDifference,
   batteryReading,
+  bodyUpY,
   buildObservation,
   computeDrive,
   downhillYaw,
@@ -254,6 +255,20 @@ describe('orientation helpers', () => {
     expect(downhillYaw(1, 0)).toBeCloseTo(-Math.PI / 2, 9)
     // Level ground keeps the fallback heading.
     expect(downhillYaw(0.001, 0.001, 0.5)).toBe(0.5)
+  })
+})
+
+describe('bodyUpY', () => {
+  it('reads 1 upright, 0 on its side, -1 inverted', () => {
+    expect(bodyUpY({ x: 0, y: 0, z: 0, w: 1 })).toBeCloseTo(1, 9)
+    // 90-degree roll about Z: x=0, y=0, z=sin(45°), w=cos(45°).
+    const side = { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 }
+    expect(bodyUpY(side)).toBeCloseTo(0, 9)
+    // 180-degree pitch about X: x=1, w=0.
+    expect(bodyUpY({ x: 1, y: 0, z: 0, w: 0 })).toBeCloseTo(-1, 9)
+    // 30-degree pitch about X stays well above the 0.5 rollover threshold.
+    const tilt = { x: Math.sin(Math.PI / 12), y: 0, z: 0, w: Math.cos(Math.PI / 12) }
+    expect(bodyUpY(tilt)).toBeCloseTo(Math.cos(Math.PI / 6), 9)
   })
 })
 

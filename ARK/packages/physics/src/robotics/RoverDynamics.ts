@@ -75,6 +75,21 @@ export function forwardFromYaw(yawRad: number): Vector3 {
 }
 
 /**
+ * World-space Y of the body up-axis for a unit quaternion: 1 upright, 0 on
+ * its side, negative past 90 degrees. Derived from q*(0,1,0)*q'.
+ */
+export function bodyUpY(rotation: Quaternion): number {
+  return 1 - 2 * (rotation.x * rotation.x + rotation.z * rotation.z)
+}
+
+/**
+ * Rollover termination threshold: upY below 0.5 (tilt past 60 degrees) is an
+ * unrecoverable failure, not a steep-but-valid slope (gentle scenarios keep
+ * the body within ~15 degrees of level, upY > 0.96).
+ */
+export const ROLLOVER_UP_THRESHOLD = 0.5
+
+/**
  * World-space direction of a body-mounted sensor ray: the local ray
  * (angleRad about the body Y axis, 0 = forward) rotated by the full body
  * quaternion, so rays pitch/roll with the chassis on slopes.
