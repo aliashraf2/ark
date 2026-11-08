@@ -1666,7 +1666,7 @@
             {/each}
             <button type="button" class="event-trigger-btn" on:click={recallDrones} disabled={controlsDisabled}><span>Recall Drones to Home</span></button>
           {/if}
-          <p class="mission-hint">Autonomy status: rover PPO {ppoPolicy ? `checkpoint · ${ppoPolicy.trainedTimesteps.toLocaleString()} steps${ppoPolicy.evaluationSuccessRate === undefined ? '' : ` · ${Math.round(ppoPolicy.evaluationSuccessRate * 100)}% raw eval success`}` : 'not loaded'}; drone PPO {dronePpoPolicy ? `checkpoint · ${dronePpoPolicy.trainedTimesteps.toLocaleString()} steps${dronePpoPolicy.evaluationSuccessRate === undefined ? '' : ` · ${Math.round(dronePpoPolicy.evaluationSuccessRate * 100)}% raw eval success`}` : dronePpoPolicyError ? 'not trained yet' : 'loading'}. PPO actions are blended with waypoint safety (80% waypoint / 20% PPO); learned cross-agent cooperation is not trained.</p>
+          <p class="mission-hint">Autonomy status: rover PPO {ppoPolicy ? `checkpoint · ${ppoPolicy.trainedTimesteps.toLocaleString()} steps${ppoPolicy.evaluationSuccessRate === undefined ? '' : ` · ${Math.round(ppoPolicy.evaluationSuccessRate * 100)}% raw eval success`}` : 'not loaded'}; drone PPO {dronePpoPolicy ? `checkpoint · ${dronePpoPolicy.trainedTimesteps.toLocaleString()} steps${dronePpoPolicy.evaluationSuccessRate === undefined ? '' : ` · ${Math.round(dronePpoPolicy.evaluationSuccessRate * 100)}% raw eval success`}` : dronePpoPolicyError ? 'not trained yet' : 'loading'}. PPO contributes a 5% action residual behind waypoint safety; learned cross-agent cooperation is not trained.</p>
         </div>
 
         <!-- Rover Fleet -->

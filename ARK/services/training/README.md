@@ -107,6 +107,12 @@ the 60-episode report is the readiness check. Rover and drone policies are
 trained independently; cooperative radio/task coordination remains a separate
 layer.
 
+The submission checkpoints currently remain experimental: the rover policy
+scored 0/20 and the drone policy scored 4/60 in raw deterministic evaluation.
+The dashboard shows those rates and blends each PPO output as a small residual
+behind its waypoint safety controller. Full per-episode reports and SB3
+checkpoints are in `results/` and `checkpoints/`.
+
 `notebooks/ARK_Colab_Setup.ipynb` installs ARK on a hosted Colab Linux
 runtime and validates real physics end to end. Open it via Colab's
 File → Upload notebook (or from GitHub once pushed), set `REPO_URL` in

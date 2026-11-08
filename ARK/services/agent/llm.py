@@ -1,8 +1,7 @@
 """LLM providers for ARK Mission Control.
 
-CSP ships Anthropic support only, but BaseLLM is its documented extension
-point ("developers pass their preferred implementation into Orchestrator"),
-so Gemini arrives as a small BaseLLM subclass over the public Gemini REST API.
+CSP ships Anthropic support, and BaseLLM is its documented extension point.
+Gemini and Meta Muse use small BaseLLM adapters over their public REST APIs.
 No CSP internals are touched: the planner, executor, and sandbox all consume
 the same complete()/complete_once() interface.
 """
@@ -18,11 +17,13 @@ from csp import AnthropicLLM, BaseLLM, LLMMessage, LLMResponse
 
 GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
 GEMINI_API_HOST = "https://generativelanguage.googleapis.com"
+MUSE_DEFAULT_MODEL = "muse-spark-1.3"
+MUSE_API_URL = "https://api.meta.ai/v1/chat/completions"
 
 
 @dataclass(frozen=True)
 class LLMConfig:
-    provider: str  # "gemini" | "anthropic" | "custom"
+    provider: str  # "gemini" | "anthropic" | "muse" | "custom"
     model: str
 
 
@@ -100,6 +101,61 @@ class GeminiLLM(BaseLLM):
         )
 
 
+class MuseLLM(BaseLLM):
+    """Meta Muse via its documented Chat Completions API and CSP's public interface.
+
+    CSP owns orchestration and history. This adapter only exchanges text; Meta
+    never receives simulation tool execution authority or a competing agent loop.
+    """
+
+    def __init__(self, api_key: str | None = None, *, model: str | None = None, timeout_s: float = 60.0) -> None:
+        self._api_key = (api_key or os.getenv("MUSE_API_KEY") or os.getenv("MODEL_API_KEY", "")).strip()
+        if not self._api_key:
+            raise ValueError("Muse API key required (MUSE_API_KEY or MODEL_API_KEY).")
+        self._model = model or os.getenv("MUSE_MODEL", MUSE_DEFAULT_MODEL)
+        self._timeout_s = timeout_s
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    async def complete(self, messages: list[LLMMessage], *, max_tokens: int = 4096,
+                       temperature: float = 0.0, system: Optional[str] = None) -> LLMResponse:
+        if not any(message.role in {"user", "assistant"} for message in messages):
+            raise ValueError("Muse called with no user/assistant messages.")
+        payload = [{"role": message.role, "content": message.content} for message in messages]
+        if system:
+            payload.insert(0, {"role": "system", "content": system})
+        body = {
+            "model": self._model, "messages": payload, "temperature": temperature,
+            # The limit includes reasoning tokens. The existing setup probe asks
+            # for 20 visible tokens; reserve enough for Muse's reasoning as well.
+            "max_completion_tokens": max(2048, max_tokens), "reasoning_effort": "low",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_s) as client:
+                response = await client.post(MUSE_API_URL, json=body, headers={"Authorization": f"Bearer {self._api_key}"})
+        except httpx.HTTPError:
+            raise RuntimeError("Muse request failed. Check the network and retry.") from None
+        if response.status_code != 200:
+            # Do not echo provider error bodies: they may contain private inputs.
+            raise RuntimeError(f"Muse API error {response.status_code}. Check the key, model access and quota.")
+        try:
+            data = response.json()
+            choice = data["choices"][0]
+            text = choice["message"]["content"]
+            finish = choice.get("finish_reason")
+            if finish == "length":
+                raise ValueError("truncated")
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError("empty")
+            usage = data.get("usage") or {}
+            return LLMResponse(content=text, input_tokens=int(usage.get("prompt_tokens", 0)),
+                               output_tokens=int(usage.get("completion_tokens", 0)), stop_reason=finish)
+        except (KeyError, IndexError, TypeError, ValueError):
+            raise RuntimeError("Muse returned an empty, malformed or incomplete answer. No commands were applied by the model.") from None
+
+
 def create_llm(provider: str, api_key: str, model: str | None = None) -> BaseLLM:
     """Build a provider LLM explicitly (used by UI-driven setup)."""
     normalized = provider.strip().lower()
@@ -109,17 +165,21 @@ def create_llm(provider: str, api_key: str, model: str | None = None) -> BaseLLM
         return GeminiLLM(api_key=api_key.strip(), model=model.strip() if model else None)
     if normalized == "anthropic":
         return AnthropicLLM(api_key=api_key.strip(), model=model.strip() if model else None)
-    raise ValueError(f'Unknown LLM provider "{provider}" (expected "gemini" or "anthropic").')
+    if normalized == "muse":
+        return MuseLLM(api_key=api_key.strip(), model=model.strip() if model else None)
+    raise ValueError(f'Unknown LLM provider "{provider}" (expected "gemini", "anthropic" or "muse").')
 
 
 def create_llm_from_env() -> tuple[BaseLLM | None, LLMConfig | None]:
-    """Probe environment for a configured provider. Gemini first, then Anthropic."""
-    gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if gemini_key:
-        model = os.environ.get("GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
-        return GeminiLLM(api_key=gemini_key, model=model), LLMConfig("gemini", model)
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-    if anthropic_key:
-        model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
-        return AnthropicLLM(api_key=anthropic_key), LLMConfig("anthropic", model)
+    """Honor the dashboard selection on restart; otherwise retain legacy priority."""
+    providers = {
+        "gemini": (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"), os.getenv("GEMINI_MODEL") or GEMINI_DEFAULT_MODEL),
+        "anthropic": (os.getenv("ANTHROPIC_API_KEY"), os.getenv("ANTHROPIC_MODEL") or "claude-haiku-4-5-20251001"),
+        "muse": (os.getenv("MUSE_API_KEY") or os.getenv("MODEL_API_KEY"), os.getenv("MUSE_MODEL") or MUSE_DEFAULT_MODEL),
+    }
+    selected = os.getenv("ARK_LLM_PROVIDER", "").strip().lower()
+    for provider in ([selected] if selected else providers):
+        key, model = providers.get(provider, (None, None))
+        if key and model:
+            return create_llm(provider, key, model), LLMConfig(provider, model)
     return None, None

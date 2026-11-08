@@ -1,7 +1,7 @@
 import type { WorldStateSnapshot } from './MissionTypes'
 import type { CommandResult } from './MissionTypes'
 
-export type MissionClientErrorCode = 'NETWORK' | 'TIMEOUT' | 'INVALID_RESPONSE' | 'SERVER'
+export type MissionClientErrorCode = 'NETWORK' | 'TIMEOUT' | 'INVALID_RESPONSE' | 'SERVER' | 'CANCELLED'
 
 export class MissionClientError extends Error {
   public readonly code: MissionClientErrorCode
@@ -76,6 +76,13 @@ export interface ConfigureResult {
   error?: string
 }
 
+export interface ConversationEntry { role: 'user' | 'assistant'; content: string }
+
+export function conversationHistory(messages: ReadonlyArray<{ kind: string; text: string }>): ConversationEntry[] {
+  return messages.filter((message) => message.kind === 'operator' || message.kind === 'agent')
+    .slice(-12).map((message) => ({ role: message.kind === 'operator' ? 'user' : 'assistant', content: message.text.slice(0, 2000) }))
+}
+
 const DEFAULT_TIMEOUT_MS = 90000
 
 /**
@@ -106,7 +113,7 @@ export class MissionClient {
   }
 
   public async configureBackend(
-    provider: 'gemini' | 'anthropic',
+    provider: 'gemini' | 'anthropic' | 'muse',
     apiKey: string,
     model?: string,
   ): Promise<ConfigureResult> {
@@ -131,12 +138,15 @@ export class MissionClient {
     message: string,
     worldState: WorldStateSnapshot,
     requestId: string,
+    signal?: AbortSignal,
+    history: ConversationEntry[] = [],
   ): Promise<InterpretResponse> {
     const response = await this.request('POST', '/api/mission/interpret', {
       request_id: requestId,
       message,
       world_state: worldState,
-    })
+      conversation_history: history,
+    }, this.timeoutMs, signal)
     if (!isRecord(response) || typeof response['status'] !== 'string') {
       throw new MissionClientError('INVALID_RESPONSE', 'Backend returned a malformed interpretation.')
     }
@@ -159,6 +169,7 @@ export class MissionClient {
     message: string,
     results: CommandResult[],
     worldState: WorldStateSnapshot,
+    signal?: AbortSignal,
   ): Promise<RespondResponse> {
     const response = await this.request('POST', '/api/mission/respond', {
       request_id: requestId,
@@ -171,7 +182,7 @@ export class MissionClient {
         error: result.error ?? null,
       })),
       world_state: worldState,
-    })
+    }, this.timeoutMs, signal)
     if (!isRecord(response) || typeof response['reply'] !== 'string') {
       throw new MissionClientError('INVALID_RESPONSE', 'Backend returned a malformed reply.')
     }
@@ -186,12 +197,12 @@ export class MissionClient {
     return response['capabilities'] as CapabilityInfo[]
   }
 
-  public async approveCapability(name: string): Promise<{
+  public async approveCapability(name: string, expectedSteps?: SynthesizedSpec['steps'], signal?: AbortSignal): Promise<{
     approved: boolean
     actions: ProposedAction[]
     error?: string
   }> {
-    const response = await this.request('POST', '/api/mission/approve_capability', { name }, 15000)
+    const response = await this.request('POST', '/api/mission/approve_capability', { name, expected_steps: expectedSteps }, 15000, signal)
     if (!isRecord(response)) {
       throw new MissionClientError('INVALID_RESPONSE', 'Backend returned a malformed approval.')
     }
@@ -207,6 +218,7 @@ export class MissionClient {
     path: string,
     body: unknown,
     timeoutMs: number = this.timeoutMs,
+    signal?: AbortSignal,
   ): Promise<unknown> {
     const controller = new AbortController()
     const timer = window.setTimeout(() => controller.abort(), timeoutMs)
@@ -215,7 +227,7 @@ export class MissionClient {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal,
+        signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
       })
       if (!response.ok) {
         const detail = await safeErrorDetail(response)
@@ -230,6 +242,7 @@ export class MissionClient {
         throw new MissionClientError('INVALID_RESPONSE', 'Backend returned invalid JSON.')
       }
     } catch (error) {
+      if (signal?.aborted) throw new MissionClientError('CANCELLED', 'Pending Mission Control request cancelled.')
       if (error instanceof MissionClientError) throw error
       if (error instanceof DOMException && error.name === 'AbortError') {
         throw new MissionClientError(

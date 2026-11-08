@@ -23,7 +23,7 @@ export interface BrowserPpoPolicy {
 }
 
 export async function loadBrowserPpoPolicy(): Promise<BrowserPpoPolicy> {
-  const response = await fetch(new URL('./ppo_mars_smoke.json', import.meta.url))
+  const response = await fetch(new URL('./ppo_rover_mars.json', import.meta.url))
   if (!response.ok) throw new Error(`PPO policy load failed (${response.status}).`)
   const policy = (await response.json()) as BrowserPpoPolicy
   validatePolicy(policy)
@@ -122,8 +122,8 @@ class StabilizedPpoController implements Controller {
     const learnedLeft = clamp(forward - turn)
     const learnedRight = clamp(forward + turn)
     const safe = this.waypointSafety.update(input, dt)
-    const desiredLeft = clamp(safe.left * 0.8 + learnedLeft * 0.2)
-    const desiredRight = clamp(safe.right * 0.8 + learnedRight * 0.2)
+    const desiredLeft = clamp(safe.left * 0.95 + learnedLeft * 0.05)
+    const desiredRight = clamp(safe.right * 0.95 + learnedRight * 0.05)
     const blend = dt > 0 ? clamp(dt / (0.12 + dt), 0.05, 1) : 1
 
     this.previousLeft += (desiredLeft - this.previousLeft) * blend

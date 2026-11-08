@@ -1,0 +1,184 @@
+{
+  "agent": "rover",
+  "planet": "mars",
+  "seed": 42,
+  "requested_timesteps": 100000,
+  "actual_timesteps": 100352,
+  "episode_step_limit": 600,
+  "evaluation": {
+    "episodes": 20,
+    "successful_episodes": 0,
+    "success_rate": 0.0,
+    "mean_reward": -12.639042854571438,
+    "mean_final_distance_m": 26.070360247402355,
+    "episode_metrics": [
+      {
+        "success": false,
+        "reward": -6.367742372286909,
+        "length": 600,
+        "final_distance_m": 23.57391705986082,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -10.751825260163365,
+        "length": 600,
+        "final_distance_m": 17.5051509393721,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -12.220739764387977,
+        "length": 600,
+        "final_distance_m": 22.437293892274273,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -8.966134935716717,
+        "length": 600,
+        "final_distance_m": 20.912695217476863,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -6.536496288499196,
+        "length": 600,
+        "final_distance_m": 9.87157260653442,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -12.413870246481732,
+        "length": 600,
+        "final_distance_m": 24.024145409594166,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -6.884006557568447,
+        "length": 600,
+        "final_distance_m": 14.51317339555915,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -10.161870629923897,
+        "length": 600,
+        "final_distance_m": 23.73512539619193,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -11.065342577210167,
+        "length": 600,
+        "final_distance_m": 32.912754406716445,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -16.56822858171734,
+        "length": 600,
+        "final_distance_m": 28.714522559561306,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -12.651752278111752,
+        "length": 600,
+        "final_distance_m": 28.614793799749812,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -13.196083847969804,
+        "length": 600,
+        "final_distance_m": 19.09064283520891,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -12.47667201131133,
+        "length": 600,
+        "final_distance_m": 24.147923607439854,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -11.233977057113409,
+        "length": 600,
+        "final_distance_m": 31.950918511768595,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -14.686469921351126,
+        "length": 600,
+        "final_distance_m": 32.680051836285216,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -16.925555308463682,
+        "length": 600,
+        "final_distance_m": 36.872020909397236,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -10.254189105702611,
+        "length": 600,
+        "final_distance_m": 34.0525318613262,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -16.438668275713006,
+        "length": 600,
+        "final_distance_m": 30.789766680605112,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -12.67592164879254,
+        "length": 600,
+        "final_distance_m": 28.17870264440277,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      },
+      {
+        "success": false,
+        "reward": -30.305310422943716,
+        "length": 600,
+        "final_distance_m": 36.82950137872193,
+        "termination_reason": null,
+        "truncation_reason": "max-steps"
+      }
+    ]
+  },
+  "wall_seconds": 196.803,
+  "model_file": "ark_rover_ppo_mars.zip",
+  "browser_policy_file": "ark_rover_ppo_mars.json",
+  "versions": {
+    "torch": "2.14.1+cpu",
+    "gymnasium": "1.4.0"
+  }
+}

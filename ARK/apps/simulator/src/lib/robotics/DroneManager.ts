@@ -90,9 +90,9 @@ export class DroneManager {
       const learned = drone.policy?.(buildDroneObservation(position, v, target))
       // Keep learned exploration inside the stable waypoint envelope while
       // the PPO checkpoint is still experimental; trained PPO supplies a
-      // bounded residual rather than taking over flight safety.
+      // small residual rather than taking over flight safety.
       const action: DroneRLAction = learned
-        ? [0, 1, 2].map((index) => waypoint[index]! * 0.8 + learned[index]! * 0.2) as unknown as DroneRLAction
+        ? [0, 1, 2].map((index) => waypoint[index]! * 0.95 + learned[index]! * 0.05) as unknown as DroneRLAction
         : waypoint
       applyDroneAction(drone.body, action, gravityMps2)
       if (drone.target && Math.hypot(target.x - p.x, target.z - p.z) < 1) drone.target = null

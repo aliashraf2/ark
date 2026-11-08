@@ -1,18 +1,22 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte'
+  import { onDestroy, onMount, tick } from 'svelte'
 
   import type { SimulationEngine } from '../core/SimulationEngine'
   import type { PlanetId } from '../../../../../packages/physics/src/worlds/PlanetConfig'
   import { CommandDispatcher } from './CommandDispatcher'
   import {
     MissionClient,
-    MissionClientError,
+    conversationHistory,
     type CapabilityInfo,
     type InterpretResponse,
     type SynthesizedSpec,
   } from './MissionClient'
   import type { AuditRecord, CommandResult, WorldStateSnapshot } from './MissionTypes'
-  import { normalizeCommand, type NormalizedCommand } from './WorldCommands'
+  import { type NormalizedCommand } from './WorldCommands'
+  import { prepareProposal } from './ProposalSafety'
+  import VoiceControls from './voice/VoiceControls.svelte'
+  import { isUnscopedConfirmation } from './voice/VoiceProtocol'
+  import { VoiceSession, initialVoiceState, type VoiceState } from './voice/VoiceSession'
 
   export let engine: SimulationEngine | null = null
   export let disabled: boolean = false
@@ -41,6 +45,14 @@
     text: string
   }
 
+  interface MissionTurn {
+    requestId: string
+    source: 'text' | 'voice'
+    controller: AbortController
+    executed: boolean
+    planet: PlanetId
+  }
+
   interface PendingProposal {
     requestId: string
     requestText: string
@@ -63,7 +75,7 @@
   let backendProvider: string | null = null
   let backendModel: string | null = null
   let capabilities: CapabilityInfo[] = []
-  let setupProvider: 'gemini' | 'anthropic' = 'gemini'
+  let setupProvider: 'gemini' | 'anthropic' | 'muse' = 'gemini'
   let setupKey = ''
   let setupModel = ''
   let setupBusy = false
@@ -74,12 +86,21 @@
   let pendingSynthesis: { requestId: string; requestText: string; spec: SynthesizedSpec } | null = null
   let history: AuditRecord[] = []
   let scrollBox: HTMLDivElement | null = null
+  let voice: VoiceSession | null = null
+  let voiceState: VoiceState = initialVoiceState()
+  let turn: MissionTurn | null = null
+  let queuedVoice: { text: string; requestId: string } | null = null
 
   $: if (engine && !dispatcher) {
     dispatcher = new CommandDispatcher(engine)
   }
   $: statusLabel = STATUS_LABELS[agentStatus]
   $: controlsOff = disabled || busy || !engine
+  $: voice?.setPhase(
+    agentStatus === 'applying' ? 'executing' :
+    agentStatus === 'awaiting-approval' ? 'awaiting-approval' :
+    busy ? 'processing' : 'listening',
+  )
 
   const STATUS_LABELS: Record<AgentStatus, string> = {
     idle: 'Standby',
@@ -93,6 +114,24 @@
   }
 
   onMount(() => {
+    voice = new VoiceSession(AGENT_URL, (state) => { voiceState = state }, (text, requestId) => {
+      if (isUnscopedConfirmation(text) && (pending || pendingSynthesis)) {
+        pushMessage('system', 'Voice cannot approve or dismiss a proposal. Use the buttons on the specific proposal below.')
+        return
+      }
+      if (busy && !pending && !pendingSynthesis && !disabled && engine) {
+        queuedVoice = { text, requestId }
+        inputText = text
+        pushMessage('system', 'Your latest spoken question will follow the current reply automatically. Cancel pending request or Stop voice to discard it.')
+        return
+      }
+      if (pending || pendingSynthesis || disabled || !engine) {
+        inputText = text
+        pushMessage('system', 'Speech saved in the text input. Finish or cancel the current request, then send it when ready.')
+        return
+      }
+      void sendMessage(text, 'voice', requestId)
+    }, () => { queuedVoice = null; if (turn?.source === 'voice') cancelMission() })
     void refreshBackendStatus()
     pushMessage(
       'system',
@@ -100,8 +139,14 @@
     )
   })
 
+  onDestroy(() => {
+    voice?.stop()
+    turn?.controller.abort()
+  })
+
   function pushMessage(kind: MessageKind, text: string): void {
     messages = [...messages.slice(-99), { id: messageSeq++, kind, text }]
+    if (kind === 'agent' || kind === 'error') void voice?.speak(text)
     void tick().then(() => {
       scrollBox?.scrollTo({ top: scrollBox.scrollHeight })
     })
@@ -167,44 +212,86 @@
     return `req-${Date.now()}-${Math.floor(Math.random() * 1e9)}`
   }
 
-  async function sendMessage(): Promise<void> {
-    const text = inputText.trim()
+  function cancelMission(): void {
+    queuedVoice = null
+    if (!turn) return
+    const executed = turn.executed
+    turn.controller.abort()
+    turn = null
+    pending = null
+    pendingSynthesis = null
+    busy = false
+    agentStatus = 'idle'
+    pushMessage('system', executed
+      ? 'Stopped waiting for the reply. Executed simulation changes remain active; stopping voice does not undo them.'
+      : 'Pending request cancelled; its proposal cannot execute. Any server-side planning may finish without applying changes.')
+  }
+
+  function currentTurn(candidate: MissionTurn): boolean {
+    return turn === candidate && !candidate.controller.signal.aborted
+  }
+
+  function finishTurn(active: MissionTurn): void {
+    if (!currentTurn(active)) return
+    busy = false
+    if (pending || pendingSynthesis) {
+      if (queuedVoice) {
+        queuedVoice = null
+        pushMessage('system', 'A proposal needs review. Your spoken follow-up remains a draft in the text input; it will not run automatically.')
+      }
+      return
+    }
+    turn = null
+    const next = queuedVoice
+    queuedVoice = null
+    if (next && voiceState.connection === 'connected' && !disabled && engine) {
+      voice?.interruptSpeech()
+      void sendMessage(next.text, 'voice', next.requestId)
+    }
+  }
+
+  async function sendMessage(text = inputText.trim(), source: 'text' | 'voice' = 'text', requestId = newRequestId()): Promise<void> {
     if (!text || busy || !engine || disabled) return
+    if (pending || pendingSynthesis) {
+      pushMessage('system', 'Confirm or dismiss the current proposal before sending another request.')
+      return
+    }
     const world = snapshot()
     if (!world) {
       pushMessage('error', 'World snapshot unavailable — engine not ready.')
       return
     }
+    const active: MissionTurn = { requestId, source, controller: new AbortController(), executed: false, planet: world.planet }
+    turn = active
     busy = true
     agentStatus = 'understanding'
-    pending = null
-    pendingSynthesis = null
     inputText = ''
+    const context = conversationHistory(messages)
     pushMessage('operator', text)
-    const requestId = newRequestId()
     try {
       await refreshBackendStatus()
-      if (backendStatus === 'offline') {
-        throw new MissionClientError(
-          'NETWORK',
-          'Cannot reach the mission-control backend. Start it with: cd services/agent && uv run uvicorn app:app --port 8000',
-        )
-      }
-      const response = await client.interpret(text, world, requestId)
-      handleInterpretation(response, text, world.planet)
+      if (!currentTurn(active)) return
+      if (backendStatus === 'offline') throw new Error('Cannot reach Mission Control. Start the agent backend and reconnect.')
+      if (backendStatus === 'no-llm') throw new Error('Link your LLM in Agent Link first. ElevenLabs handles hearing and speaking; the linked LLM generates the answer.')
+      const response = await client.interpret(text, world, requestId, active.controller.signal, context)
+      if (!currentTurn(active)) return
+      if (response.request_id !== requestId) throw new Error('Mission Control returned a mismatched request ID; no commands executed.')
+      await handleInterpretation(response, text, world.planet, active)
     } catch (error) {
+      if (!currentTurn(active)) return
       agentStatus = 'failed'
       pushMessage('error', error instanceof Error ? error.message : 'Interpretation failed.')
     } finally {
-      busy = false
+      finishTurn(active)
     }
   }
 
-  function handleInterpretation(
+  async function handleInterpretation(
     response: InterpretResponse,
     requestText: string,
     planet: PlanetId,
-  ): void {
+    active: MissionTurn,
+  ): Promise<void> {
     switch (response.status) {
       case 'clarification':
         agentStatus = 'completed'
@@ -253,7 +340,7 @@
           pushMessage('error', 'Backend returned an empty proposal — nothing to execute.')
           return
         }
-        stageProposal(response, requestText, planet)
+        await stageProposal(response, requestText, planet, active)
         return
       }
       default:
@@ -262,31 +349,11 @@
     }
   }
 
-  function stageProposal(response: InterpretResponse, requestText: string, planet: PlanetId): void {
-    // Local re-validation: the backend never gets the final word on physics safety.
-    const commands: NormalizedCommand[] = []
-    const warnings: string[] = []
-    for (const action of response.actions) {
-      const proposal = normalizeCommand(action.command, action.params, planet, action.command_id)
-      if (!proposal.normalized) {
-        agentStatus = 'failed'
-        pushMessage(
-          'error',
-          `Local validation rejected “${action.command}”: ${proposal.validation.errors.join('; ')}`,
-        )
-        return
-      }
-      commands.push(proposal.normalized)
-      warnings.push(...proposal.validation.warnings, ...action.warnings)
-      if (proposal.validation.requiresConfirmation || action.requires_confirmation) {
-        warnings.push(`“${action.command}” requires confirmation.`)
-      }
-    }
-    const needsApproval =
-      !autoExecute || response.actions.some((action) => action.requires_confirmation)
+  async function stageProposal(response: InterpretResponse, requestText: string, planet: PlanetId, active: MissionTurn): Promise<void> {
+    const { commands, warnings, needsApproval } = prepareProposal(response, planet, autoExecute)
     if (!needsApproval) {
       agentStatus = 'preparing'
-      void executeCommands(response.request_id, requestText, commands, warnings, response.capability_ids)
+      await executeCommands(response.request_id, requestText, commands, warnings, response.capability_ids, active)
       return
     }
     pending = {
@@ -309,11 +376,18 @@
     commands: NormalizedCommand[],
     warnings: string[],
     capabilityIds: string[],
+    active: MissionTurn,
   ): Promise<void> {
-    if (!dispatcher || !engine) return
+    if (!dispatcher || !engine || !currentTurn(active)) return
+    if (snapshot()?.planet !== active.planet) {
+      agentStatus = 'failed'
+      pushMessage('error', 'The active planet changed while this request was pending. Send the instruction again for the current world; nothing was applied.')
+      return
+    }
     agentStatus = 'applying'
     const results: CommandResult[] = []
     for (const command of commands) {
+      if (!currentTurn(active)) break
       if (command.command === 'assign_rover_mission' || command.command === 'assign_drone_mission') {
         const before = snapshot()
         try {
@@ -326,6 +400,7 @@
       } else {
         results.push(dispatcher.dispatch(command, { requestText, warnings }))
       }
+      active.executed = true
     }
     history = dispatcher.history
     onEnvironmentChanged()
@@ -334,14 +409,16 @@
     const world = snapshot()
     try {
       if (!world) throw new Error('World snapshot unavailable after execution.')
-      const reply = await client.respond(requestId, requestText, results, world)
+      const reply = await client.respond(requestId, requestText, results, world, active.controller.signal)
+      if (!currentTurn(active)) return
       agentStatus = failed.length > 0 ? 'failed' : 'completed'
       const prefix =
         failed.length > 0
-          ? `Completed with ${failed.length} failure${failed.length === 1 ? '' : 's'} (via ${capabilityIds.join(', ') || 'world commands'}): `
+          ? `Completed with ${failed.length} failure${failed.length === 1 ? '' : 's'} (via ${capabilityIds.join(', ') || 'world commands'}):\n${localSummary(failed)}\n`
           : ''
       pushMessage(failed.length > 0 ? 'error' : 'agent', `${prefix}${reply.reply}`)
     } catch (error) {
+      if (!currentTurn(active)) return
       // Verified results exist locally — report them even if the summary call fails.
       agentStatus = failed.length > 0 ? 'failed' : 'completed'
       pushMessage(
@@ -366,8 +443,9 @@
       .join('\n')
   }
 
-  function confirmPending(): void {
-    if (!pending || busy) return
+  function confirmPending(requestId: string): void {
+    if (!pending || busy || disabled || !turn || pending.requestId !== requestId || turn.requestId !== requestId) return
+    const active = turn
     const proposal = pending
     pending = null
     busy = true
@@ -378,25 +456,31 @@
       proposal.commands,
       proposal.warnings,
       proposal.capabilityIds,
+      active,
     ).finally(() => {
-      busy = false
+      finishTurn(active)
     })
   }
 
   function dismissPending(): void {
+    queuedVoice = null
+    turn?.controller.abort()
+    turn = null
     pending = null
     pendingSynthesis = null
     agentStatus = 'idle'
     pushMessage('system', 'Proposal dismissed — no changes were made.')
   }
 
-  async function approveSynthesis(): Promise<void> {
-    if (!pendingSynthesis || busy || !engine) return
+  async function approveSynthesis(requestId: string): Promise<void> {
+    if (!pendingSynthesis || busy || !engine || disabled || !turn || pendingSynthesis.requestId !== requestId || turn.requestId !== requestId) return
+    const active = turn
     busy = true
     agentStatus = 'applying'
-    const { requestId, requestText, spec } = pendingSynthesis
+    const { requestText, spec } = pendingSynthesis
     try {
-      const approval = await client.approveCapability(spec.name)
+      const approval = await client.approveCapability(spec.name, spec.steps, active.controller.signal)
+      if (!currentTurn(active)) return
       if (!approval.approved) {
         throw new Error(approval.error ?? 'Backend refused approval.')
       }
@@ -412,40 +496,16 @@
         actions: approval.actions,
         capability_ids: [spec.name],
       }
-      stageProposalAsApproved(staged, requestText, world.planet)
+      if (!currentTurn(active)) return
+      const { commands, warnings } = prepareProposal(staged, world.planet, false)
+      await executeCommands(requestId, requestText, commands, warnings, staged.capability_ids, active)
     } catch (error) {
+      if (!currentTurn(active)) return
       agentStatus = 'failed'
       pushMessage('error', error instanceof Error ? error.message : 'Approval failed.')
-      busy = false
+    } finally {
+      finishTurn(active)
     }
-  }
-
-  function stageProposalAsApproved(
-    response: InterpretResponse,
-    requestText: string,
-    planet: PlanetId,
-  ): void {
-    const commands: NormalizedCommand[] = []
-    for (const action of response.actions) {
-      const proposal = normalizeCommand(action.command, action.params, planet, action.command_id)
-      if (!proposal.normalized) {
-        agentStatus = 'failed'
-        pushMessage(
-          'error',
-          `Approved synthesis failed local validation: ${proposal.validation.errors.join('; ')}`,
-        )
-        busy = false
-        return
-      }
-      commands.push(proposal.normalized)
-    }
-    agentStatus = 'preparing'
-    pushMessage('agent', `Capability “${response.capability_ids[0] ?? 'synthesis'}” approved and registered. Executing ${commands.length} validated steps.`)
-    void executeCommands(response.request_id, requestText, commands, [], response.capability_ids).finally(
-      () => {
-        busy = false
-      },
-    )
   }
 
   function replayRecord(record: AuditRecord): void {
@@ -521,7 +581,7 @@
         <span class="switch-subtext">Off by default. Confirmations still required for risky ops.</span>
       </div>
       <label class="apple-switch">
-        <input type="checkbox" bind:checked={autoExecute} disabled={controlsOff && !engine} />
+        <input type="checkbox" aria-label="Auto-execute safe actions" bind:checked={autoExecute} disabled={controlsOff && !engine} />
         <span class="switch-slider"></span>
       </label>
     </div>
@@ -545,6 +605,7 @@
           >
             <option value="gemini">Gemini (Google AI Studio)</option>
             <option value="anthropic">Anthropic (Claude)</option>
+            <option value="muse">Muse (Meta)</option>
           </select>
         </div>
         <div class="control-group">
@@ -553,7 +614,7 @@
             id="mission-setup-key"
             class="ark-input mono"
             type="password"
-            placeholder={setupProvider === 'gemini' ? 'AIza… (aistudio.google.com/apikey)' : 'sk-ant-…'}
+            placeholder={setupProvider === 'gemini' ? 'AIza… (aistudio.google.com/apikey)' : setupProvider === 'muse' ? 'Meta Model API key (dev.meta.ai)' : 'sk-ant-…'}
             bind:value={setupKey}
             disabled={setupBusy}
             autocomplete="off"
@@ -565,7 +626,7 @@
             id="mission-setup-model"
             class="ark-input mono"
             type="text"
-            placeholder={setupProvider === 'gemini' ? 'gemini-2.5-flash' : 'claude-haiku-4-5'}
+            placeholder={setupProvider === 'gemini' ? 'gemini-2.5-flash' : setupProvider === 'muse' ? 'muse-spark-1.3' : 'claude-haiku-4-5'}
             bind:value={setupModel}
             disabled={setupBusy}
             autocomplete="off"
@@ -594,6 +655,23 @@
       <p class="mission-hint">{capabilities.length} capabilities registered (incl. synthesized).</p>
     {/if}
   </div>
+
+  <VoiceControls
+    baseUrl={AGENT_URL}
+    llmReady={backendStatus === 'online'}
+    llmLabel={backendProvider ? `${backendProvider} · ${backendModel ?? 'default model'}` : 'LLM not linked'}
+    state={voiceState}
+    disabled={disabled || !engine}
+    canCancel={turn !== null}
+    onStart={() => void voice?.start()}
+    onStop={() => voice?.stop()}
+    onMicrophoneMute={() => voice?.muteMicrophone(!voiceState.microphoneMuted)}
+    onSpeechMute={() => voice?.muteSpeech(!voiceState.speechMuted)}
+    onInterrupt={() => voice?.interruptSpeech()}
+    onCancel={cancelMission}
+    onConfigured={() => voice?.stop()}
+    onWakeChange={(required) => voice?.setWakeRequired(required)}
+  />
 
   <!-- Conversation -->
   <div class="dock-section mission-chat-section">
@@ -643,6 +721,7 @@
         <h3 class="section-title">Proposed Intervention</h3>
         <span class="section-badge badge-warn">AWAITING APPROVAL</span>
       </div>
+      <p class="mission-hint mono">Request: {pending.requestId}</p>
       <ul class="mission-step-list">
         {#each pending.commands as command (command.commandId)}
           <li class="mono">{describeCommand(command)}</li>
@@ -656,7 +735,7 @@
         </ul>
       {/if}
       <div class="event-triggers-grid">
-        <button type="button" class="event-trigger-btn" on:click={confirmPending} disabled={busy}>
+        <button type="button" class="event-trigger-btn" on:click={() => pending && confirmPending(pending.requestId)} disabled={busy}>
           Confirm & Execute
         </button>
         <button type="button" class="event-trigger-btn" on:click={dismissPending} disabled={busy}>
@@ -690,7 +769,7 @@
         <button
           type="button"
           class="event-trigger-btn"
-          on:click={() => void approveSynthesis()}
+          on:click={() => pendingSynthesis && void approveSynthesis(pendingSynthesis.requestId)}
           disabled={busy}
         >
           Approve & Register
