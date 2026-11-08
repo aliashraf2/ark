@@ -74,9 +74,13 @@ export class CommandDispatcher {
 
     const stateBefore = this.safeWorldState()
     try {
-      const data = this.execute(normalized)
+      if (!stateBefore) throw new Error('World snapshot unavailable; command was not applied.')
+      // Consume the id before touching the engine: a partially failed operation
+      // must not be retried implicitly by a transcript or network resend.
       this.executedIds.add(normalized.commandId)
+      const data = this.execute(normalized)
       const stateAfter = this.safeWorldState()
+      if (!stateAfter) throw new Error('Command was applied but its resulting state could not be verified. Do not automatically retry.')
       if (stateBefore && stateAfter) {
         this.auditLog.push(
           buildAuditRecord(
@@ -162,6 +166,13 @@ export class CommandDispatcher {
 
   private dispatchRead(normalized: NormalizedCommand): CommandResult {
     const state = this.safeWorldState()
+    if (!state) {
+      return {
+        commandId: normalized.commandId, command: normalized.command,
+        outcome: 'failed', message: 'Live world state is unavailable.',
+        error: 'Live world state is unavailable.', stateBefore: null, stateAfter: null,
+      }
+    }
     if (normalized.command === 'get_world_state') {
       return {
         commandId: normalized.commandId,
@@ -222,7 +233,10 @@ export class CommandDispatcher {
           priority: params['priority'] as number | undefined,
         })
       case 'stop_weather_event':
-        return this.executor.stopEvent(params['id'] as string)
+        if (!this.executor.stopEvent(params['id'] as string)) {
+          throw new Error(`Weather event “${String(params['id'])}” is not active; nothing was stopped.`)
+        }
+        return true
       case 'set_solar_illumination':
         return this.executor.setSolarMultiplier(params['multiplier'] as number)
       case 'pause_simulation':

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from agent import AgentNotConfigured, MissionAgent
 from llm import LLMConfig, create_llm, create_llm_from_env
 from world_commands import load_protocol
+from voice import router as voice_router
 
 
 def env_file_path() -> Path:
@@ -80,10 +81,16 @@ def write_env_key(key: str, value: str) -> Path:
     return path
 
 
+class ConversationMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class InterpretRequest(BaseModel):
     request_id: str
     message: str = Field(min_length=1, max_length=2000)
     world_state: dict[str, Any]
+    conversation_history: list[ConversationMessage] = Field(default_factory=list, max_length=12)
 
 
 class ActionModel(BaseModel):
@@ -129,6 +136,7 @@ class RespondResponse(BaseModel):
 
 class ApproveRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
+    expected_steps: list[dict[str, Any]] | None = None
 
 
 class ApproveResponse(BaseModel):
@@ -164,13 +172,14 @@ def create_app(
     agent = MissionAgent(llm=resolved_llm, planner_dir=planner_dir)
 
     app = FastAPI(title="ARK Mission Control", version="4.0.0")
+    app.include_router(voice_router)
     cors_override = os.environ.get("ARK_CORS_ORIGINS")
     if cors_override:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=cors_override.split(","),
             allow_methods=["GET", "POST"],
-            allow_headers=["Content-Type"],
+            allow_headers=["Content-Type", "X-ARK-Voice"],
         )
     else:
         # Localhost-only default: any local port (vite picks 5173, 5199, ...).
@@ -178,7 +187,7 @@ def create_app(
             CORSMiddleware,
             allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
             allow_methods=["GET", "POST"],
-            allow_headers=["Content-Type"],
+            allow_headers=["Content-Type", "X-ARK-Voice"],
         )
     app.state.agent = agent
     app.state.planner_dir = planner_dir
@@ -203,9 +212,9 @@ def create_app(
         """UI-driven setup: validate a pasted key with a live probe, then persist
         it to the server-side .env and hot-swap the agent's LLM (no restart)."""
         provider = request.provider.strip().lower()
-        if provider not in ("gemini", "anthropic"):
+        if provider not in ("gemini", "anthropic", "muse"):
             return ConfigureResponse(
-                configured=False, error='Unknown provider (expected "gemini" or "anthropic").'
+                configured=False, error='Unknown provider (expected "gemini", "anthropic" or "muse").'
             )
         try:
             candidate = create_llm(provider, request.api_key, request.model)
@@ -220,12 +229,15 @@ def create_app(
                 configured=False, error=f"Key validation failed: {exc}"
             )
         model = getattr(candidate, "model", None) or getattr(candidate, "_model", None) or ""
-        env_key = "GEMINI_API_KEY" if provider == "gemini" else "ANTHROPIC_API_KEY"
+        env_key = {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "muse": "MUSE_API_KEY"}[provider]
         write_env_key(env_key, request.api_key.strip())
-        if provider == "gemini" and request.model:
-            write_env_key("GEMINI_MODEL", request.model.strip())
-        if provider == "anthropic" and request.model:
-            write_env_key("ANTHROPIC_MODEL", request.model.strip())
+        model_key = f"{provider.upper()}_MODEL"
+        persisted_model = str(model or request.model or "")
+        if persisted_model:
+            write_env_key(model_key, persisted_model)
+            os.environ[model_key] = persisted_model
+        write_env_key("ARK_LLM_PROVIDER", provider)
+        os.environ["ARK_LLM_PROVIDER"] = provider
         os.environ[env_key] = request.api_key.strip()
         app.state.agent = MissionAgent(llm=candidate, planner_dir=app.state.planner_dir)
         app.state.llm_config = LLMConfig(provider, str(model))
@@ -238,7 +250,8 @@ def create_app(
     @app.post("/api/mission/interpret", response_model=InterpretResponse)
     async def interpret(request: InterpretRequest) -> InterpretResponse:
         try:
-            result = await app.state.agent.interpret(request.message, request.world_state)
+            result = await app.state.agent.interpret(request.message, request.world_state,
+                [entry.model_dump() for entry in request.conversation_history])
         except AgentNotConfigured as exc:
             raise HTTPException(status_code=503, detail=str(exc))
         return InterpretResponse(
@@ -264,7 +277,7 @@ def create_app(
     @app.post("/api/mission/approve_capability", response_model=ApproveResponse)
     async def approve_capability(request: ApproveRequest) -> ApproveResponse:
         try:
-            outcome = await app.state.agent.approve_synthesis(request.name)
+            outcome = await app.state.agent.approve_synthesis(request.name, request.expected_steps)
         except KeyError as exc:
             return ApproveResponse(approved=False, error=str(exc))
         except ValueError as exc:

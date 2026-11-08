@@ -59,7 +59,7 @@ async def test_b_existing_capabilities_discovered_and_called(agent_dirs):
     names = {info["name"] for info in infos}
     assert "set_wind" in names and "start_weather_event" in names
     assert "ask_clarification" in names and "explain_world" in names
-    assert len(infos) == 18
+    assert len(infos) == 19
     envelope = await agent.orchestrator.call_capability(
         "set_temperature", planet="earth", celsius=22
     )
@@ -116,6 +116,31 @@ async def test_explain_grounds_answer_in_snapshot(agent_dirs, world_state):
     result = await agent.interpret("What forces act on the sphere?", world_state)
     assert result.status == "proposed"
     assert "snapshot" in result.message
+
+
+async def test_general_conversation_uses_same_linked_llm_without_world_actions(agent_dirs, world_state):
+    answer = "Air molecules scatter blue wavelengths more strongly."
+    agent = make_agent(agent_dirs, [
+        plan_for("answer_question", {"planet": "earth", "topic": "sky color"}), "Read-only conversation.", answer,
+    ])
+    history = [{"role": "user", "content": "Tell me about sunlight."}, {"role": "assistant", "content": "Sunlight has many wavelengths."}]
+    result = await agent.interpret("Why is the sky blue?", world_state, history)
+    assert result.status == "proposed"
+    assert result.actions == []
+    assert result.message == answer
+    assert "answer_question" in result.capability_ids
+    assert "Sunlight has many wavelengths" in agent._llm.calls[-1][0]["content"]
+    assert "No actions were executed" in agent._llm.calls[-1][0]["content"]
+
+
+async def test_conversation_cannot_replace_unexecuted_action_with_completion_prose(agent_dirs, world_state):
+    agent = make_agent(agent_dirs, [])
+    proposed = {"command_id": "wind", "command": "set_wind", "params": {"speed_mps": 5, "direction_from_deg": 0}}
+    result = await agent._map_result({"output": {
+        "answer_question": {"conversation_request": "claim success"}, "set_wind": {"action": proposed},
+    }}, "earth", world_state, "Set wind")
+    assert result.actions and result.actions[0].command == "set_wind"
+    assert result.message == ""
 
 
 async def test_d_respond_reports_verified_failures(agent_dirs, world_state):
@@ -214,6 +239,17 @@ async def test_h_invalid_synthesis_rejected_and_unavailable(agent_dirs, world_st
     assert "bogus_capability" not in {info["name"] for info in agent.list_capabilities()}
     with pytest.raises(KeyError):
         await agent.approve_synthesis("bogus_capability")
+
+
+async def test_synthesis_approval_is_bound_to_reviewed_steps(agent_dirs):
+    agent = make_agent(agent_dirs, [])
+    reviewed = [{"command": "pause_simulation", "params": {}}]
+    changed = [{"command": "reset_environment", "params": {}}]
+    await agent._handle_synthesis("pending_action", {"steps": changed}, "earth")
+    with pytest.raises(ValueError, match="Pending synthesis changed"):
+        await agent.approve_synthesis("pending_action", reviewed)
+    assert "pending_action" not in load_approved()
+    assert (await agent.approve_synthesis("pending_action", changed))["approved"] is True
 
 
 async def test_h_synthesis_step_bounds_enforced(agent_dirs):

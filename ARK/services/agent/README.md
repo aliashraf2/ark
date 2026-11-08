@@ -30,8 +30,26 @@ Then open the simulator (`apps/simulator`, `npm run dev`), go to the
 **Mission AI** tab, and paste your API key in the **Agent Link** setup box.
 The backend validates the key with a live probe, stores it in its local
 gitignored `.env`, and hot-swaps the agent's brain — no restart, no terminal
-editing. Gemini (Google AI Studio) and Anthropic are supported; keys can also
-be set directly as `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` in `.env`.
+editing. Gemini (Google AI Studio), Anthropic, and **Muse (Meta)** are supported;
+keys can also be set as `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `MUSE_API_KEY`
+in `.env`. `MODEL_API_KEY` is accepted as the official Meta environment alias.
+
+For Muse, select **Muse (Meta)** in Agent Link and paste your Meta Model API key.
+The default model is `muse-spark-1.3`; the optional model field can select another
+text model available to your account. The adapter calls Meta's fixed
+`https://api.meta.ai/v1/chat/completions` endpoint using bearer authentication,
+as documented in the [Meta Chat Completions guide](https://dev.meta.ai/docs/protocols/chat-completions).
+It implements CSP's existing `BaseLLM` interface, so typed and spoken requests
+keep the same capability discovery, validation, approval and execution path.
+The token budget includes an allowance for Muse reasoning, including the setup
+probe. Provider errors, empty answers and truncated answers fail explicitly.
+
+After successful dashboard setup, `ARK_LLM_PROVIDER` records your selection so
+it remains active after restart even when another provider's key is present.
+Without a selection, the legacy priority remains Gemini, Anthropic, then Muse.
+Never place provider keys in browser environment variables or source code.
+Muse HTTP mapping and dashboard setup are tested with mocked provider responses;
+no live Muse API request was made without an account key.
 
 The simulator calls this service at `http://localhost:8000`
 (override with `VITE_AGENT_URL`).

@@ -72,6 +72,40 @@ function mustNormalize(command: string, params: unknown, planet: PlanetId = 'ear
 }
 
 describe('CommandDispatcher', () => {
+  it('reports an unavailable telemetry snapshot as a failed read', () => {
+    const dispatcher = new CommandDispatcher(makeExecutor({ getWorldState: () => { throw new Error('offline') } }))
+    expect(dispatcher.dispatch(mustNormalize('get_world_state', {})).outcome).toBe('failed')
+  })
+  it('reports missing weather events as failures rather than successful cancellation', () => {
+    const dispatcher = new CommandDispatcher(makeExecutor({ stopEvent: () => false }))
+    const result = dispatcher.dispatch(mustNormalize('stop_weather_event', { id: 'missing' }))
+    expect(result.outcome).toBe('failed')
+    expect(result.error).toContain('not active')
+  })
+
+  it('does not replay an operation that partially changed state and then threw', () => {
+    const apply = vi.fn(() => { throw new Error('partial engine failure') })
+    const dispatcher = new CommandDispatcher(makeExecutor({ pause: apply }))
+    const command = mustNormalize('pause_simulation', {})
+    expect(dispatcher.dispatch(command).outcome).toBe('failed')
+    expect(dispatcher.dispatch(command).outcome).toBe('duplicate')
+    expect(apply).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not touch physics if the before snapshot is unavailable', () => {
+    const apply = vi.fn()
+    const dispatcher = new CommandDispatcher(makeExecutor({ pause: apply, getWorldState: () => { throw new Error('offline') } }))
+    expect(dispatcher.dispatch(mustNormalize('pause_simulation', {})).outcome).toBe('failed')
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('does not report success when the post-execution snapshot is unavailable', () => {
+    const snapshot = vi.fn().mockReturnValueOnce(makeWorldState()).mockImplementation(() => { throw new Error('offline') })
+    const dispatcher = new CommandDispatcher(makeExecutor({ getWorldState: snapshot }))
+    const result = dispatcher.dispatch(mustNormalize('pause_simulation', {}))
+    expect(result.outcome).toBe('failed')
+    expect(result.error).toContain('could not be verified')
+  })
   it('executes validated commands through the executor', () => {
     const executor = makeExecutor()
     const dispatcher = new CommandDispatcher(executor)

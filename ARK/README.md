@@ -3,6 +3,9 @@
 Physics-based Earth/Mars simulator (Three.js + Rapier) with AI Mission Control
 (CSP-orchestrated natural-language environment control).
 
+Optional ElevenLabs voice Mission Control: see [VOICE.md](VOICE.md) for secure
+configuration, controls, demo scenarios, tests, and current capability limits.
+
 ## Run everything (one command)
 
 ```bash
@@ -11,7 +14,7 @@ Physics-based Earth/Mars simulator (Three.js + Rapier) with AI Mission Control
 
 Starts the agent backend (`:8000`) and the simulator (`:5173`, or the next
 free port — watch the `[sim]` lines). Open the simulator URL in your browser,
-go to the **Mission AI** tab, and paste a Gemini or Anthropic API key if the
+go to the **Mission AI** tab, and paste a Gemini, Anthropic, or Muse (Meta) API key if the
 Agent Link box asks for one. Ctrl-C stops everything.
 
 Custom ports: `AGENT_PORT=8000 SIM_PORT=5173 ./scripts/dev.sh`
