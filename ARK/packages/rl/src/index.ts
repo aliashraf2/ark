@@ -22,6 +22,7 @@ export {
   type TruncationReason,
 } from './environment/ArkEnvironment'
 export { DEFAULT_RL_CONFIG, resolveEnvironmentConfig } from './environment/EnvironmentConfig'
+export { DroneEnvironment, type DroneEnvironmentConfig, type DroneResetOptions } from './environment/DroneEnvironment'
 export { EpisodeTracker, createEpisodeMetrics } from './environment/EpisodeState'
 export { OBSERVATION_SIZE, OBSERVATION_SPEC, observationBounds, toFloat32Array } from './observations/observationSpec'
 export {

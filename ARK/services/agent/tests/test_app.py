@@ -21,8 +21,8 @@ def test_health_reports_unconfigured(agent_dirs):
     body = response.json()
     assert body["status"] == "ok"
     assert body["llm_configured"] is False
-    assert body["protocol_version"] == "4.0.0"
-    assert body["commands"] == 15
+    assert body["protocol_version"] == "4.1.0"
+    assert body["commands"] == 17
 
 
 def test_capabilities_lists_registered(agent_dirs):

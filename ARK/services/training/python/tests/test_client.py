@@ -37,6 +37,21 @@ def test_create_reset_step_roundtrip(client):
         client.close_env(env_id)
 
 
+def test_drone_bridge_uses_three_action_channels(client):
+    env_id = client.create({**TINY, "agentType": "drone"})
+    try:
+        spaces = client.get_spaces("drone")
+        assert spaces["observation"]["shape"] == [9]
+        assert spaces["action"]["shape"] == [3]
+        reset = client.reset(env_id, seed=11)
+        assert len(reset["observation"]) == 9
+        step = client.step(env_id, [0.0, 0.0, 0.0])
+        assert len(step["observation"]) == 9
+        assert step["info"]["metrics"]["length"] == 1
+    finally:
+        client.close_env(env_id)
+
+
 def test_unknown_env_ids_rejected(client):
     with pytest.raises(ArkUnknownEnvError):
         client.reset("env-nope", seed=1)

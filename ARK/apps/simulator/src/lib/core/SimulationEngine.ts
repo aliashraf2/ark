@@ -18,6 +18,7 @@ import { SimulationClock } from '../../../../../packages/physics/src/core/Simula
 import { CooperativeRescueCoordinator } from '../robotics/coordination/CooperativeRescueCoordinator'
 import { DroneManager } from '../robotics/DroneManager'
 import { HabitatBuilder } from '../robotics/HabitatBuilder'
+import { SampleManager } from '../robotics/SampleManager'
 
 export type { StartEventSpec }
 
@@ -37,6 +38,7 @@ export class SimulationEngine {
   public readonly cooperation: CooperativeRescueCoordinator
   public readonly drones: DroneManager
   public readonly habitats: HabitatBuilder
+  public readonly samples: SampleManager
 
   private readonly clock = new SimulationClock()
   private readonly cameraController: CameraController
@@ -53,6 +55,7 @@ export class SimulationEngine {
   private destroyRequested = false
   private lastConfig: PlanetConfig | null = null
   private followRoverId: string | null = null
+  private followDroneId: string | null = null
 
   constructor(
     container: HTMLElement,
@@ -86,6 +89,7 @@ export class SimulationEngine {
     )
     this.drones = new DroneManager(this.physicsWorld.world, this.sceneManager.scene, (x, z) => getTerrainHeight(this.environment.heightfield, x, z))
     this.habitats = new HabitatBuilder(this.physicsWorld.world, this.sceneManager.scene)
+    this.samples = new SampleManager(this.physicsWorld.world, this.sceneManager.scene)
     this.cooperation = new CooperativeRescueCoordinator(this.robots, (x, z, seed) => this.spawnRover(x, z, seed))
     this.environment.switchPlanet('earth')
     this.handleResize()
@@ -175,6 +179,11 @@ export class SimulationEngine {
         } else {
           this.followRoverId = null
         }
+      }
+      if (this.followDroneId) {
+        const position = this.drones.position(this.followDroneId)
+        if (position) this.cameraController.trackTarget(position)
+        else this.followDroneId = null
       }
       this.cameraController.update()
       this.sceneManager.render()
@@ -271,6 +280,12 @@ export class SimulationEngine {
     return this.habitats.build(x, z, getTerrainHeight(this.environment.heightfield, x, z))
   }
 
+  public placeSample(x: number, z: number): string {
+    return this.samples.place(x, z, getTerrainHeight(this.environment.heightfield, x, z))
+  }
+
+  public collectSample(id: string): boolean { return this.samples.collect(id) }
+
   public removeRover(id: string): boolean {
     if (this.followRoverId === id) this.followRoverId = null
     return this.robots.remove(id)
@@ -283,6 +298,12 @@ export class SimulationEngine {
 
   public setFollowRover(id: string | null): void {
     this.followRoverId = id && this.robots.get(id) ? id : null
+    if (this.followRoverId) this.followDroneId = null
+  }
+
+  public setFollowDrone(id: string | null): void {
+    this.followDroneId = id && this.drones.position(id) ? id : null
+    if (this.followDroneId) this.followRoverId = null
   }
 
   public get followRover(): string | null {

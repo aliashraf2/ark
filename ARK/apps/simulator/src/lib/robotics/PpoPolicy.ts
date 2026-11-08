@@ -1,6 +1,6 @@
 import { buildObservation } from '../../../../../packages/physics/src/robotics/RoverDynamics'
 import { angleDifference } from '../../../../../packages/physics/src/robotics/RoverDynamics'
-import type { ControlInput, Controller } from '../../../../../packages/physics/src/robotics/controllers'
+import { NavigationController, type ControlInput, type Controller } from '../../../../../packages/physics/src/robotics/controllers'
 import { resolveRoverConfig, type DriveAction } from '../../../../../packages/physics/src/robotics/RoverConfig'
 
 const DEFAULT_ROVER_CONFIG = resolveRoverConfig({})
@@ -11,9 +11,11 @@ export interface DenseLayer {
 }
 
 export interface BrowserPpoPolicy {
-  format: 'ark-ppo-mlp-v1'
+  format: 'ark-ppo-mlp-v1' | 'ark-ppo-rover-mlp-v1'
   planet: string
   trainedTimesteps: number
+  evaluationEpisodes?: number
+  evaluationSuccessRate?: number
   observationSize: number
   activation: 'tanh'
   hiddenLayers: DenseLayer[]
@@ -72,13 +74,16 @@ function clamp(value: number, min = -1, max = 1): number {
 
 function validatePolicy(policy: BrowserPpoPolicy): void {
   if (
-    policy.format !== 'ark-ppo-mlp-v1' ||
+    (policy.format !== 'ark-ppo-mlp-v1' && policy.format !== 'ark-ppo-rover-mlp-v1') ||
     policy.observationSize !== 12 ||
     policy.activation !== 'tanh' ||
     policy.hiddenLayers.length === 0 ||
     policy.actionLayer.weights.length !== 2
   ) {
     throw new Error('PPO checkpoint format does not match the dashboard rover policy.')
+  }
+  if (policy.evaluationSuccessRate !== undefined && (!Number.isFinite(policy.evaluationSuccessRate) || policy.evaluationSuccessRate < 0 || policy.evaluationSuccessRate > 1)) {
+    throw new Error('PPO checkpoint has an invalid evaluation success rate.')
   }
   let inputSize = policy.observationSize
   for (const layer of [...policy.hiddenLayers, policy.actionLayer]) {
@@ -97,6 +102,7 @@ class StabilizedPpoController implements Controller {
   public readonly kind = 'external' as const
   private previousLeft = 0
   private previousRight = 0
+  private readonly waypointSafety = new NavigationController()
 
   constructor(private readonly policy: BrowserPpoPolicy) {}
 
@@ -113,8 +119,11 @@ class StabilizedPpoController implements Controller {
     const turn = clamp(learnedTurn * 0.6 - input.yawRateRadS * 1.2, -0.35, 0.35)
     const spinGate = clamp(1 - Math.abs(input.yawRateRadS) / 2, 0, 1)
     const forward = clamp(learnedForward * 0.55, -0.45, 0.45) * spinGate
-    const desiredLeft = clamp(forward - turn)
-    const desiredRight = clamp(forward + turn)
+    const learnedLeft = clamp(forward - turn)
+    const learnedRight = clamp(forward + turn)
+    const safe = this.waypointSafety.update(input, dt)
+    const desiredLeft = clamp(safe.left * 0.8 + learnedLeft * 0.2)
+    const desiredRight = clamp(safe.right * 0.8 + learnedRight * 0.2)
     const blend = dt > 0 ? clamp(dt / (0.12 + dt), 0.05, 1) : 1
 
     this.previousLeft += (desiredLeft - this.previousLeft) * blend
@@ -139,5 +148,6 @@ class StabilizedPpoController implements Controller {
   public reset(): void {
     this.previousLeft = 0
     this.previousRight = 0
+    this.waypointSafety.reset()
   }
 }

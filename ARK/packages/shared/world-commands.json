@@ -1,6 +1,6 @@
 {
   "protocol": "ark.world-commands",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "Canonical ARK Milestone 4 world command protocol. Single source of truth shared by the TypeScript simulator and the Python mission-control backend. All units SI unless noted.",
   "planets": {
     "earth": {
@@ -150,6 +150,27 @@
       "reversible": false,
       "params": {
         "scenario_id": { "type": "string", "required": true }
+      }
+    },
+    "assign_rover_mission": {
+      "description": "Deploy an available rover from robot home and assign a PPO navigation, habitat construction, or sample collection mission at a target coordinate.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": true,
+      "reversible": false,
+      "params": {
+        "task": { "type": "enum", "values": ["navigate", "build_habitat", "collect_sample"], "required": true },
+        "target_x": { "type": "number", "min": -45, "max": 45, "required": true },
+        "target_z": { "type": "number", "min": -45, "max": 45, "required": true }
+      }
+    },
+    "assign_drone_mission": {
+      "description": "Deploy an available scout drone from robot home and assign a PPO aerial scouting mission at a target coordinate.",
+      "planets": ["earth", "mars"],
+      "requiresConfirmation": true,
+      "reversible": false,
+      "params": {
+        "target_x": { "type": "number", "min": -45, "max": 45, "required": true },
+        "target_z": { "type": "number", "min": -45, "max": 45, "required": true }
       }
     }
   },

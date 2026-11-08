@@ -10,8 +10,8 @@ from world_commands import CommandValidationError, load_protocol, validate_comma
 def test_protocol_loads_canonical_version():
     protocol = load_protocol()
     assert protocol.raw["protocol"] == "ark.world-commands"
-    assert protocol.raw["version"] == "4.0.0"
-    assert len(protocol.commands) == 15
+    assert protocol.raw["version"] == "4.1.0"
+    assert len(protocol.commands) == 17
 
 
 def test_unknown_command_rejected():

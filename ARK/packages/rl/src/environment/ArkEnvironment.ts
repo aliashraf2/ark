@@ -92,6 +92,7 @@ export class ArkEnvironment {
   private hasReset = false
   private done = false
   private closed = false
+  private previousShieldedAction = { left: 0, right: 0 }
 
   private constructor(config: ResolvedArkEnvironmentConfig, heightfield: Heightfield, env: RoverEnv) {
     this.config = config
@@ -176,6 +177,7 @@ export class ArkEnvironment {
     }
     this.episodeIndex += 1
     this.tracker.reset(result.info.start, this.scenario.distanceM)
+    this.previousShieldedAction = { left: 0, right: 0 }
     this.hasReset = true
     this.done = false
     return {
@@ -193,9 +195,13 @@ export class ArkEnvironment {
       throw new Error('step() after episode end: call reset() to start a new episode.')
     }
     const validated = validateRoverAction(action)
-    const result = this.env.step(toDriveAction(validated))
+    const policyObservation = this.env.getObservation()
+    const shielded = this.shieldRoverAction(validated, policyObservation)
+    const result = this.env.step(toDriveAction(shielded))
+    const rolloverPenalty = result.info.upY < ROLLOVER_UP_THRESHOLD ? -100 : 0
+    const reward = result.reward + rolloverPenalty
     this.tracker.recordStep({
-      reward: result.reward,
+      reward,
       distanceM: result.info.distanceM,
       position: result.info.position,
       collided: result.terms.collisionPenalty !== 0,
@@ -223,12 +229,12 @@ export class ArkEnvironment {
     }
     return {
       observation: toFloat32Array(result.observation),
-      reward: result.reward,
+      reward,
       terminated,
       truncated,
       info: {
         metrics: this.tracker.snapshot(),
-        rewardTerms: { ...result.terms },
+        rewardTerms: { ...result.terms, ...(rolloverPenalty ? { rolloverPenalty } : {}) },
         actionClipped: validated.clipped,
         distanceM: result.info.distanceM,
         batteryPercent: result.info.batteryPercent,
@@ -269,6 +275,31 @@ export class ArkEnvironment {
       )
     }
     return { x: point.x, z: point.z }
+  }
+
+  /**
+   * Apply the same bounded, yaw-damped PPO actuator envelope used by the
+   * browser controller. Training against this shield prevents exploratory
+   * torque spikes from teaching a policy that immediately rolls the chassis.
+   */
+  private shieldRoverAction(
+    action: { left: number; right: number; clipped: boolean },
+    observation: ArrayLike<number>,
+  ): { left: number; right: number; clipped: boolean; brake: false; eStop: false } {
+    const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value))
+    const yawRate = (observation[4] ?? 0) * 3
+    const learnedForward = (action.left + action.right) / 2
+    const learnedTurn = (action.right - action.left) / 2
+    const turn = clamp(learnedTurn * 0.6 - yawRate * 1.2, -0.35, 0.35)
+    const spinGate = clamp(1 - Math.abs(yawRate) / 2, 0, 1)
+    const forward = clamp(learnedForward * 0.55, -0.45, 0.45) * spinGate
+    const desiredLeft = clamp(forward - turn, -1, 1)
+    const desiredRight = clamp(forward + turn, -1, 1)
+    const dt = FIXED_TIME_STEP * this.config.actionRepeat
+    const blend = clamp(dt / (0.12 + dt), 0.05, 1)
+    this.previousShieldedAction.left += (desiredLeft - this.previousShieldedAction.left) * blend
+    this.previousShieldedAction.right += (desiredRight - this.previousShieldedAction.right) * blend
+    return { ...this.previousShieldedAction, clipped: action.clipped, brake: false, eStop: false }
   }
 }
 

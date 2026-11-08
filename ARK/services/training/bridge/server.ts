@@ -61,18 +61,14 @@ function checkResetOptions(options: unknown): ResetOptions {
   return out
 }
 
-function checkAction(action: unknown): { leftDrive: number; rightDrive: number } {
-  if (!Array.isArray(action) || action.length !== 2) {
-    throw new ValidationError('Action must be an array of 2 numbers [leftDrive, rightDrive].')
+function checkAction(action: unknown, expectedSize: number): number[] {
+  if (!Array.isArray(action) || action.length !== expectedSize) {
+    throw new ValidationError(`Action must be an array of ${expectedSize} numbers.`)
   }
-  const [leftDrive, rightDrive] = action
-  if (typeof leftDrive !== 'number' || !Number.isFinite(leftDrive)) {
-    throw new ValidationError('Action leftDrive must be a finite number.')
+  if (action.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+    throw new ValidationError('Every action value must be a finite number.')
   }
-  if (typeof rightDrive !== 'number' || !Number.isFinite(rightDrive)) {
-    throw new ValidationError('Action rightDrive must be a finite number.')
-  }
-  return { leftDrive, rightDrive }
+  return action as number[]
 }
 
 class ValidationError extends Error {
@@ -96,7 +92,7 @@ class BridgeServer {
             return { code: 'validation_error', message: 'create payload must be an environment config object.' }
           }
           try {
-            const envId = await this.registry.create(request.payload as unknown as ArkEnvironmentConfig)
+            const envId = await this.registry.create(request.payload as unknown as ArkEnvironmentConfig & { agentType?: 'rover' | 'drone' })
             return { result: { envId } }
           } catch (error) {
             return this.asError(error)
@@ -120,14 +116,18 @@ class BridgeServer {
             return { code: 'validation_error', message: 'step payload must be { action: [left, right] }.' }
           }
           try {
-            const result = this.registry.step(request.envId as string, checkAction(request.payload.action))
+            const envId = request.envId as string
+            const result = this.registry.step(envId, checkAction(request.payload.action, this.registry.actionSize(envId)))
             return { result: serializeResult(result) }
           } catch (error) {
             return this.asError(error)
           }
         }
-        case 'get_spaces':
-          return { result: this.registry.getSpaces() }
+        case 'get_spaces': {
+          const payload = isRecord(request.payload) ? request.payload : {}
+          const agentType = payload.agentType === 'drone' ? 'drone' : 'rover'
+          return { result: this.registry.getSpaces(agentType) }
+        }
         case 'get_metrics': {
           try {
             return { result: this.registry.getMetrics(request.envId as string) }

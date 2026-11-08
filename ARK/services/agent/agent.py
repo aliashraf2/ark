@@ -70,6 +70,8 @@ REGISTERED_WORLD_COMMANDS = [
     "resume_simulation",
     "reset_environment",
     "apply_scenario",
+    "assign_rover_mission",
+    "assign_drone_mission",
 ]
 
 META_CAPABILITIES = ["ask_clarification", "explain_world", "report_unsupported"]
@@ -188,6 +190,14 @@ def register_world_capabilities(app: Orchestrator) -> None:
     async def apply_scenario(planet: str, scenario_id: str) -> dict[str, Any]:
         return _propose("apply_scenario", {"scenario_id": scenario_id}, planet, f"Apply scenario {scenario_id}.")
 
+    @app.capability(description="Assign a rover mission from home: navigate, build_habitat, or collect_sample. Requires an explicit target_x and target_z in meters. The operator confirms deployment before execution.")
+    async def assign_rover_mission(planet: str, task: str, target_x: float, target_z: float) -> dict[str, Any]:
+        return _propose("assign_rover_mission", {"task": task, "target_x": target_x, "target_z": target_z}, planet, f"Assign rover to {task} at ({target_x}, {target_z}).")
+
+    @app.capability(description="Deploy a scout drone and assign an aerial PPO mission to coordinates target_x and target_z in meters. Requires operator confirmation.")
+    async def assign_drone_mission(planet: str, target_x: float, target_z: float) -> dict[str, Any]:
+        return _propose("assign_drone_mission", {"target_x": target_x, "target_z": target_z}, planet, f"Scout ({target_x}, {target_z}) by drone.")
+
     @app.capability(description="Ask the user a clarifying question when the request is ambiguous, or to offer a physically valid alternative instead of silently substituting (e.g. dust storm instead of a Martian hurricane).")
     async def ask_clarification(planet: str, question: str) -> dict[str, Any]:
         return {"clarification": question}
@@ -236,7 +246,7 @@ class MissionAgent:
     def list_capabilities(self) -> list[dict[str, Any]]:
         infos: list[dict[str, Any]] = []
         for name in REGISTERED_WORLD_COMMANDS + META_CAPABILITIES:
-            infos.append({"name": name, "kind": "registered", "version": "4.0.0"})
+            infos.append({"name": name, "kind": "registered", "version": "4.1.0"})
         for name, entry in load_approved().items():
             infos.append(
                 {

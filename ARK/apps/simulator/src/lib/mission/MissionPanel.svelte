@@ -19,6 +19,9 @@
   /** Called after agent-driven changes so host sliders re-sync from state. */
   export let onEnvironmentChanged: () => void = () => {}
   export let notify: (message: string) => void = () => {}
+  export let onRobotMission: (command: NormalizedCommand) => string = () => {
+    throw new Error('Robot mission execution is unavailable.')
+  }
 
   type AgentStatus =
     | 'idle'
@@ -311,7 +314,18 @@
     agentStatus = 'applying'
     const results: CommandResult[] = []
     for (const command of commands) {
-      results.push(dispatcher.dispatch(command, { requestText, warnings }))
+      if (command.command === 'assign_rover_mission' || command.command === 'assign_drone_mission') {
+        const before = snapshot()
+        try {
+          const message = onRobotMission(command)
+          results.push({ commandId: command.commandId, command: command.command, outcome: 'executed', message, stateBefore: before, stateAfter: snapshot() })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Robot mission failed.'
+          results.push({ commandId: command.commandId, command: command.command, outcome: 'failed', message, error: message, stateBefore: before, stateAfter: snapshot() })
+        }
+      } else {
+        results.push(dispatcher.dispatch(command, { requestText, warnings }))
+      }
     }
     history = dispatcher.history
     onEnvironmentChanged()

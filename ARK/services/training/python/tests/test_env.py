@@ -158,3 +158,21 @@ def test_gymnasium_passive_checker():
         checker.check_env(env, skip_render_check=True)
     finally:
         env.close()
+
+
+def test_drone_env_has_matching_spaces_and_steps():
+    env = ArkEnv(
+        planet="mars", terrain_seed=12, terrain_subdivisions=16,
+        agent_type="drone", max_steps=10,
+    )
+    try:
+        assert env.observation_space.shape == (9,)
+        assert env.action_space.shape == (3,)
+        obs, _ = env.reset(seed=4)
+        assert obs.shape == (9,)
+        obs, reward, terminated, truncated, info = env.step(np.zeros(3, dtype=np.float32))
+        assert obs.shape == (9,) and np.isfinite(reward)
+        assert isinstance(terminated, bool) and isinstance(truncated, bool)
+        assert info["metrics"]["length"] == 1
+    finally:
+        env.close()

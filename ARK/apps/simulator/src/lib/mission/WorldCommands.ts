@@ -17,6 +17,8 @@ export type WorldCommandId =
   | 'resume_simulation'
   | 'reset_environment'
   | 'apply_scenario'
+  | 'assign_rover_mission'
+  | 'assign_drone_mission'
 
 export type CommandParamType =
   | 'number'
@@ -209,6 +211,29 @@ export const WORLD_COMMANDS: Record<WorldCommandId, CommandDescriptor> = {
     reversible: false,
     params: {
       scenario_id: { type: 'string', required: true },
+    },
+  },
+  assign_rover_mission: {
+    id: 'assign_rover_mission',
+    description: 'Deploy an available rover from robot home and assign a PPO navigation, habitat construction, or sample collection mission at a target coordinate.',
+    planets: ['earth', 'mars'],
+    requiresConfirmation: true,
+    reversible: false,
+    params: {
+      task: { type: 'enum', values: ['navigate', 'build_habitat', 'collect_sample'], required: true },
+      target_x: { type: 'number', min: -45, max: 45, required: true },
+      target_z: { type: 'number', min: -45, max: 45, required: true },
+    },
+  },
+  assign_drone_mission: {
+    id: 'assign_drone_mission',
+    description: 'Deploy an available scout drone from robot home and assign a PPO aerial scouting mission at a target coordinate.',
+    planets: ['earth', 'mars'],
+    requiresConfirmation: true,
+    reversible: false,
+    params: {
+      target_x: { type: 'number', min: -45, max: 45, required: true },
+      target_z: { type: 'number', min: -45, max: 45, required: true },
     },
   },
 }

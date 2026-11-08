@@ -59,12 +59,22 @@ async def test_b_existing_capabilities_discovered_and_called(agent_dirs):
     names = {info["name"] for info in infos}
     assert "set_wind" in names and "start_weather_event" in names
     assert "ask_clarification" in names and "explain_world" in names
-    assert len(infos) == 18
+    assert len(infos) == 20
     envelope = await agent.orchestrator.call_capability(
         "set_temperature", planet="earth", celsius=22
     )
     assert envelope["action"]["command"] == "set_temperature"
     assert envelope["action"]["params"] == {"celsius": 22.0}
+
+
+async def test_rover_mission_capability_proposes_validated_rl_task(agent_dirs):
+    agent = make_agent(agent_dirs, [])
+    envelope = await agent.orchestrator.call_capability(
+        "assign_rover_mission", planet="mars", task="collect_sample", target_x=12, target_z=-8
+    )
+    assert envelope["action"]["command"] == "assign_rover_mission"
+    assert envelope["action"]["params"] == {"task": "collect_sample", "target_x": 12.0, "target_z": -8.0}
+    assert envelope["action"]["requires_confirmation"] is True
 
 
 async def test_capability_call_rejects_invalid_args(agent_dirs):

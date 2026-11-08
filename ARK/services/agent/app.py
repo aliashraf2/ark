@@ -163,7 +163,7 @@ def create_app(
         resolved_llm, resolved_config = create_llm_from_env()
     agent = MissionAgent(llm=resolved_llm, planner_dir=planner_dir)
 
-    app = FastAPI(title="ARK Mission Control", version="4.0.0")
+    app = FastAPI(title="ARK Mission Control", version="4.1.0")
     cors_override = os.environ.get("ARK_CORS_ORIGINS")
     if cors_override:
         app.add_middleware(

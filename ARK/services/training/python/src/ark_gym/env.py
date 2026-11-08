@@ -56,6 +56,7 @@ class ArkEnv(gym.Env[np.ndarray, np.ndarray]):
         bridge_path: str | Path | None = None,
         runner: str | None = None,
         timeout: float = 120.0,
+        agent_type: str = "rover",
         **env_config: Any,
     ) -> None:
         """Create the env and boot its bridge process.
@@ -73,14 +74,16 @@ class ArkEnv(gym.Env[np.ndarray, np.ndarray]):
         resolved_terrain_seed = terrain_seed if terrain_seed is not None else seed
         if resolved_terrain_seed is None:
             resolved_terrain_seed = self.np_random.integers(0, 2**31 - 1).item()
-        payload: dict[str, Any] = {"planet": planet, "terrainSeed": resolved_terrain_seed}
+        if agent_type not in {"rover", "drone"}:
+            raise ValueError("agent_type must be 'rover' or 'drone'.")
+        payload: dict[str, Any] = {"planet": planet, "terrainSeed": resolved_terrain_seed, "agentType": agent_type}
         for key, value in env_config.items():
             payload[_CONFIG_KEYS.get(key, key)] = value
 
         self._client = BridgeClient(bridge_path=bridge_path, runner=runner, timeout=timeout)
         try:
             self._env_id = self._client.create(payload)
-            spaces_desc = self._client.get_spaces()
+            spaces_desc = self._client.get_spaces(agent_type)
         except Exception:
             self._client.close()
             raise
@@ -123,14 +126,15 @@ class ArkEnv(gym.Env[np.ndarray, np.ndarray]):
         try:
             vector = np.asarray(action, dtype=np.float32).reshape(-1)
         except (ValueError, TypeError) as exc:
-            raise ArkValidationError(f"Action must be a 2-vector, got {action!r}.") from exc
-        if vector.shape != (2,):
-            raise ArkValidationError(f"Action must have shape (2,), got {vector.shape}.")
+            raise ArkValidationError(f"Action must be a vector, got {action!r}.") from exc
+        expected_shape = self.action_space.shape
+        if vector.shape != expected_shape:
+            raise ArkValidationError(f"Action must have shape {expected_shape}, got {vector.shape}.")
         if not np.all(np.isfinite(vector)):
             raise ArkValidationError(f"Action must be finite, got {vector!r}.")
         # Finite out-of-range values pass through: TypeScript clips them (Box
         # convention) and reports info["actionClipped"] — single source of truth.
-        result = self._client.step(self._env_id, [float(vector[0]), float(vector[1])])
+        result = self._client.step(self._env_id, [float(value) for value in vector])
         return (
             self._checked_observation(result["observation"]),
             float(result["reward"]),

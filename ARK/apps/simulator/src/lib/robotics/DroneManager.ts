@@ -1,8 +1,9 @@
 import * as THREE from 'three'
 import RAPIER from '@dimforge/rapier3d-compat'
 import type { Vector3 } from '../../../../../packages/physics/src/types/SimulationTypes'
+import { applyDroneAction, buildDroneObservation, createDroneBody, waypointDroneAction, type DroneRLAction } from '../../../../../packages/physics/src/robotics/DroneDynamics'
 
-interface Drone { id: string; body: RAPIER.RigidBody; group: THREE.Group; target: Vector3 | null }
+interface Drone { id: string; body: RAPIER.RigidBody; group: THREE.Group; target: Vector3 | null; policy: ((observation: Float32Array) => DroneRLAction) | null }
 
 /** Small quadrotor fleet sharing the simulator's Rapier world and terrain. */
 export class DroneManager {
@@ -20,30 +21,34 @@ export class DroneManager {
     this.sequence += 1
     const id = `drone-${this.sequence}`
     const y = this.surfaceY(x, z) + 5
-    const body = this.world.createRigidBody(
-      RAPIER.RigidBodyDesc.dynamic().setTranslation(x, y, z).setLinearDamping(2.5).setAngularDamping(8).lockRotations(),
-    )
-    this.world.createCollider(RAPIER.ColliderDesc.cuboid(0.3, 0.08, 0.3).setDensity(1.4), body)
+    const body = createDroneBody(this.world, { x, y, z })
     const group = new THREE.Group()
-    const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.12, 8), new THREE.MeshStandardMaterial({ color: 0x26394b, metalness: 0.65, roughness: 0.35 }))
+    const shell = new THREE.Mesh(new THREE.OctahedronGeometry(0.27, 0), new THREE.MeshStandardMaterial({ color: 0x49f1ff, emissive: 0x00a9c7, emissiveIntensity: 1.35, metalness: 0.35, roughness: 0.25 }))
     group.add(shell)
-    const armMaterial = new THREE.MeshStandardMaterial({ color: 0x64e4ff, emissive: 0x168aaa, emissiveIntensity: 0.5 })
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.04, 0.07), armMaterial)
+    const armMaterial = new THREE.MeshStandardMaterial({ color: 0xa5f8ff, emissive: 0x168aaa, emissiveIntensity: 0.9, metalness: 0.35, roughness: 0.3 })
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.065, 0.085), armMaterial)
     group.add(arm)
-    const crossArm = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.9), armMaterial)
+    const crossArm = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.065, 1.45), armMaterial)
     group.add(crossArm)
-    const lens = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), new THREE.MeshStandardMaterial({ color: 0xffc45c, emissive: 0xff8420, emissiveIntensity: 0.8 }))
+    const lens = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.24, 8), new THREE.MeshStandardMaterial({ color: 0xffd272, emissive: 0xff8420, emissiveIntensity: 1.2 }))
+    lens.rotation.x = Math.PI / 2
     lens.position.set(0, 0, 0.22)
     group.add(lens)
-    const propMaterial = new THREE.MeshStandardMaterial({ color: 0x9fb3c7, transparent: true, opacity: 0.45 })
-    for (const [px, pz] of [[-0.4, -0.4], [-0.4, 0.4], [0.4, -0.4], [0.4, 0.4]]) {
-      const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.015, 20), propMaterial)
-      rotor.position.set(px!, 0.08, pz!)
+    const propMaterial = new THREE.MeshStandardMaterial({ color: 0x9bffff, emissive: 0x42dfff, emissiveIntensity: 1.3, metalness: 0.1, roughness: 0.25 })
+    for (const [px, pz] of [[-0.68, -0.68], [-0.68, 0.68], [0.68, -0.68], [0.68, 0.68]]) {
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.22, 8), armMaterial)
+      mast.position.set(px!, 0.12, pz!)
+      group.add(mast)
+      const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.035, 20), propMaterial)
+      rotor.position.set(px!, 0.24, pz!)
       group.add(rotor)
     }
+    const beacon = new THREE.PointLight(0x43eeff, 12, 7)
+    beacon.position.y = 0.2
+    group.add(beacon)
     group.position.set(x, y, z)
     this.scene.add(group)
-    this.drones.set(id, { id, body, group, target: null })
+    this.drones.set(id, { id, body, group, target: null, policy: null })
     return id
   }
 
@@ -61,15 +66,35 @@ export class DroneManager {
     return { x: p.x, y: p.y, z: p.z }
   }
 
+  public velocity(id: string): Vector3 | null {
+    const drone = this.drones.get(id)
+    if (!drone) return null
+    const v = drone.body.linvel()
+    return { x: v.x, y: v.y, z: v.z }
+  }
+
+  public setPolicy(id: string, policy: ((observation: Float32Array) => DroneRLAction) | null): boolean {
+    const drone = this.drones.get(id)
+    if (!drone) return false
+    drone.policy = policy
+    return true
+  }
+
   public preStep(dt: number, gravityMps2: number): void {
     for (const drone of this.drones.values()) {
-      const p = drone.body.translation(), v = drone.body.linvel()
+      const p = drone.body.translation(), velocity = drone.body.linvel()
+      const position = { x: p.x, y: p.y, z: p.z }
+      const v = { x: velocity.x, y: velocity.y, z: velocity.z }
       const target = drone.target ?? { x: p.x, y: this.surfaceY(p.x, p.z) + 5, z: p.z }
-      const desiredX = Math.max(-4, Math.min(4, (target.x - p.x) * 1.3))
-      const desiredZ = Math.max(-4, Math.min(4, (target.z - p.z) * 1.3))
-      const desiredY = Math.max(-2, Math.min(2, (target.y - p.y) * 2))
-      const mass = drone.body.mass()
-      drone.body.addForce({ x: mass * (desiredX - v.x) * 2, y: mass * (gravityMps2 + (desiredY - v.y) * 3), z: mass * (desiredZ - v.z) * 2 }, true)
+      const waypoint = waypointDroneAction(position, v, target, gravityMps2)
+      const learned = drone.policy?.(buildDroneObservation(position, v, target))
+      // Keep learned exploration inside the stable waypoint envelope while
+      // the PPO checkpoint is still experimental; trained PPO supplies a
+      // bounded residual rather than taking over flight safety.
+      const action: DroneRLAction = learned
+        ? [0, 1, 2].map((index) => waypoint[index]! * 0.8 + learned[index]! * 0.2) as unknown as DroneRLAction
+        : waypoint
+      applyDroneAction(drone.body, action, gravityMps2)
       if (drone.target && Math.hypot(target.x - p.x, target.z - p.z) < 1) drone.target = null
     }
     void dt

@@ -233,8 +233,8 @@ class BridgeClient:
     def step(self, env_id: str, action: list[float]) -> dict[str, Any]:
         return self._request("step", env_id, {"action": action})
 
-    def get_spaces(self) -> dict[str, Any]:
-        return self._request("get_spaces")
+    def get_spaces(self, agent_type: str = "rover") -> dict[str, Any]:
+        return self._request("get_spaces", payload={"agentType": agent_type})
 
     def get_metrics(self, env_id: str) -> dict[str, Any]:
         return self._request("get_metrics", env_id)

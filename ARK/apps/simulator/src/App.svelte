@@ -17,6 +17,8 @@
   import type { PlanetId } from '../../../packages/physics/src/worlds/PlanetConfig'
   import { profilesForPlanet } from '../../../packages/physics/src/worlds/planetPresets'
   import { createPpoController, loadBrowserPpoPolicy, type BrowserPpoPolicy } from './lib/robotics/PpoPolicy'
+  import type { NormalizedCommand } from './lib/mission/WorldCommands'
+  import { createDronePpoAction, loadDronePpoPolicy, type DronePpoPolicy } from './lib/robotics/DronePpoPolicy'
   import type { CooperativeRescueSnapshot } from './lib/robotics/coordination/CooperativeRescueCoordinator'
 
   type RoverControlMode = 'manual' | 'navigation' | 'external' | 'ppo'
@@ -59,6 +61,8 @@
   let ppoPolicy: BrowserPpoPolicy | null = null
   let ppoPolicyLoading = true
   let ppoPolicyError: string | null = null
+  let dronePpoPolicy: DronePpoPolicy | null = null
+  let dronePpoPolicyError: string | null = null
   let manualKeys: ManualKeyState = {
     forward: false,
     reverse: false,
@@ -75,8 +79,11 @@
   let missionInstruction = ''
   let missionResult = ''
   let droneIds: string[] = []
+  let droneSnapshots: Array<{ id: string; position: { x: number; y: number; z: number }; speed: number }> = []
   let builderMissions: Record<string, { x: number; z: number; missionId: string }> = {}
+  let sampleMissions: Record<string, { sampleId: string; missionId: string }> = {}
   let builtHabitats: string[] = []
+  let collectedSamples: string[] = []
 
   let telemetry: TelemetryState = {
     time: 0,
@@ -95,6 +102,9 @@
         ppoPolicy = policy
         ppoPolicyLoading = false
       })
+    void loadDronePpoPolicy().then((policy) => { dronePpoPolicy = policy }).catch((error) => {
+      dronePpoPolicyError = error instanceof Error ? error.message : 'Could not load drone PPO checkpoint.'
+    })
       .catch((error) => {
         ppoPolicyError = error instanceof Error ? error.message : 'Could not load PPO checkpoint.'
         ppoPolicyLoading = false
@@ -401,6 +411,11 @@
       .filter((snapshot): snapshot is RoverSnapshot => snapshot !== null)
     rescueSnapshot = engine.cooperation.snapshot()
     droneIds = engine.drones.ids()
+    droneSnapshots = droneIds.flatMap((id) => {
+      const position = engine?.drones.position(id)
+      const velocity = engine?.drones.velocity(id)
+      return position ? [{ id, position, speed: velocity ? Math.hypot(velocity.x, velocity.y, velocity.z) : 0 }] : []
+    })
     for (const [id, target] of Object.entries(builderMissions)) {
       const mission = engine.robots.missions.get(target.missionId)
       if (mission?.status === 'succeeded') {
@@ -413,6 +428,18 @@
         missionResult = `${id} could not reach the build site (${mission.failReason ?? 'mission failed'}).`
       }
     }
+    for (const [id, job] of Object.entries(sampleMissions)) {
+      const mission = engine.robots.missions.get(job.missionId)
+      if (mission?.status === 'succeeded') {
+        engine.collectSample(job.sampleId)
+        collectedSamples = [...collectedSamples, job.sampleId]
+        delete sampleMissions[id]
+        missionResult = `${id} collected ${job.sampleId} on ${engine.environment.info.displayName}.`
+      } else if (mission?.status === 'failed') {
+        delete sampleMissions[id]
+        missionResult = `${id} could not reach ${job.sampleId}; the sample marker remains at the site.`
+      }
+    }
   }
 
   function homeDeploy(kind: HomeUnit): string | null {
@@ -422,6 +449,7 @@
       const id = engine.deployDrone(offset.x, offset.z)
       homeInventory = { ...homeInventory, drone: homeInventory.drone - 1 }
       droneIds = engine.drones.ids()
+      engine.setFollowDrone(id)
       return id
     }
     const id = engine.spawnRover(offset.x, offset.z)
@@ -453,9 +481,17 @@
     if (!engine || droneIds.length === 0) return
     const returning = [...droneIds]
     for (const id of returning) engine.drones.remove(id)
+    engine.setFollowDrone(null)
     homeInventory = { ...homeInventory, drone: homeInventory.drone + returning.length }
     droneIds = engine.drones.ids()
     showToast(`${returning.length} drone${returning.length === 1 ? '' : 's'} returned to robot home`)
+  }
+
+  function trackDrone(id: string): void {
+    if (!engine) return
+    engine.setFollowDrone(id)
+    followRoverEnabled = false
+    showToast(`Camera following ${id}`)
   }
 
   function dispatchMission(): void {
@@ -471,13 +507,25 @@
       const id = droneIds[0] ?? homeDeploy('drone')
       if (!id) { missionResult = 'No drone is available at home.'; return }
       engine.drones.command(id, target.x, target.z)
+      if (dronePpoPolicy) engine.drones.setPolicy(id, createDronePpoAction(dronePpoPolicy))
+      engine.setFollowDrone(id)
+      followRoverEnabled = false
       missionResult = `${id} launched from home and is flying to scout (${target.x}, ${target.z}).`
       return
     }
     const build = text.includes('build') || text.includes('house') || text.includes('habitat')
+    const sample = text.includes('sample') || text.includes('specimen') || text.includes('soil')
+    if (sample && (text.includes('mars') || text.includes('martian')) && engine.environment.info.planet !== 'mars') {
+      engine.switchPlanet('mars')
+      engine.setTerrainProfile('smooth-basin')
+      envInfo = engine.environmentInfo
+      showToast('Mars sample mission selected · smooth basin terrain loaded')
+    }
     const id = build
       ? roverIds.find((candidate) => engine?.cooperation.capabilities.get(candidate)?.role === 'builder') ?? homeDeploy('builder')
-      : selectedRover ?? roverIds[0] ?? homeDeploy('explorer')
+      : sample
+        ? roverIds.find((candidate) => engine?.cooperation.capabilities.get(candidate)?.role === 'explorer') ?? homeDeploy('explorer')
+        : selectedRover ?? roverIds[0] ?? homeDeploy('explorer')
     if (!id) { missionResult = `No ${build ? 'builder' : 'rover'} is available at home.`; return }
     const rover = engine.robots.get(id)
     if (!rover) return
@@ -485,13 +533,65 @@
     if (active) engine.robots.missions.abort(active.id)
     const mission = engine.robots.missions.create(id, rover.position, { x: target.x, y: 0, z: target.z }, 2, 240)
     engine.robots.missions.start(mission.id)
-    engine.robots.setController(id, new NavigationController())
-    roverModes[id] = 'navigation'
+    const usePpo = ppoPolicy !== null
+    engine.robots.setController(id, usePpo ? createPpoController(ppoPolicy!) : new NavigationController())
+    roverModes[id] = usePpo ? 'ppo' : 'navigation'
     selectedRover = id
-    roverControlMode = 'navigation'
+    roverControlMode = usePpo ? 'ppo' : 'navigation'
     if (build) builderMissions[id] = { ...target, missionId: mission.id }
-    missionResult = `${id} assigned to ${build ? 'construct a habitat' : 'navigate'} at (${target.x}, ${target.z}).`
+    if (sample) {
+      const sampleId = engine.placeSample(target.x, target.z)
+      sampleMissions[id] = { sampleId, missionId: mission.id }
+    }
+    engine.setFollowRover(id)
+    followRoverEnabled = true
+    missionResult = `${id} assigned ${usePpo ? 'PPO' : 'waypoint'} control to ${build ? 'construct a habitat' : sample ? 'collect a soil sample' : 'navigate'} at (${target.x}, ${target.z}) on ${engine.environment.info.displayName}.`
     refreshRovers()
+  }
+
+  function executeRobotMission(command: NormalizedCommand): string {
+    if (!engine || !envInfo) throw new Error('Simulation is still starting.')
+    const x = Number(command.params['target_x'])
+    const z = Number(command.params['target_z'])
+    const half = envInfo.terrainWidth / 2 - 5
+    const target = { x: Math.max(-half, Math.min(half, x)), z: Math.max(-half, Math.min(half, z)) }
+    if (command.command === 'assign_drone_mission') {
+      const id = droneIds[0] ?? homeDeploy('drone')
+      if (!id) throw new Error('No scout drone is available at robot home.')
+      if (!engine.drones.command(id, target.x, target.z)) throw new Error(`Drone ${id} is unavailable.`)
+      if (dronePpoPolicy) engine.drones.setPolicy(id, createDronePpoAction(dronePpoPolicy))
+      engine.setFollowDrone(id)
+      followRoverEnabled = false
+      const quality = dronePpoPolicy?.evaluationSuccessRate
+      missionResult = `${id} launched on ${dronePpoPolicy ? `PPO-assisted waypoint control (${dronePpoPolicy.trainedTimesteps.toLocaleString()} steps${quality === undefined ? '' : `, ${Math.round(quality * 100)}% raw-policy eval success`})` : 'classical waypoint control'} to (${target.x}, ${target.z}).`
+      return missionResult
+    }
+    const task = String(command.params['task'])
+    const role: HomeUnit = task === 'build_habitat' ? 'builder' : 'explorer'
+    const id = roverIds.find((candidate) => engine?.cooperation.capabilities.get(candidate)?.role === role) ?? homeDeploy(role)
+    if (!id) throw new Error(`No ${role} rover is available at robot home.`)
+    const rover = engine.robots.get(id)
+    if (!rover) throw new Error(`Rover ${id} is unavailable.`)
+    const active = engine.robots.missions.missionForRover(id)
+    if (active) engine.robots.missions.abort(active.id)
+    const mission = engine.robots.missions.create(id, rover.position, { x: target.x, y: 0, z: target.z }, 2, 240)
+    engine.robots.missions.start(mission.id)
+    const usePpo = ppoPolicy !== null
+    engine.robots.setController(id, usePpo ? createPpoController(ppoPolicy!) : new NavigationController())
+    roverModes[id] = usePpo ? 'ppo' : 'navigation'
+    selectedRover = id
+    roverControlMode = usePpo ? 'ppo' : 'navigation'
+    if (task === 'build_habitat') builderMissions[id] = { ...target, missionId: mission.id }
+    if (task === 'collect_sample') {
+      const sampleId = engine.placeSample(target.x, target.z)
+      sampleMissions[id] = { sampleId, missionId: mission.id }
+    }
+    engine.setFollowRover(id)
+    followRoverEnabled = true
+    const successRate = ppoPolicy?.evaluationSuccessRate
+    missionResult = `${id} assigned ${usePpo ? `PPO-assisted waypoint${successRate === undefined ? '' : ` (${Math.round(successRate * 100)}% raw-policy eval success)`}` : 'waypoint'} control for ${task.replace('_', ' ')} at (${target.x}, ${target.z}).`
+    refreshRovers()
+    return missionResult
   }
 
   function startMarsRescueDemo(): void {
@@ -1547,7 +1647,7 @@
 
         <div class="dock-section">
           <div class="section-title-row"><h3 class="section-title">Mission Command</h3><span class="section-badge">CAPABILITY ROUTING</span></div>
-          <p class="mission-hint">Give the fleet an objective. Supported examples: “build a habitat at 12, 8”, “send a drone to scout 15, -4”, or “explore 10, 10”.</p>
+          <p class="mission-hint">Examples: “build a habitat at 12, 8”, “send a drone to scout 15, -4”, or “collect a Mars soil sample at 10, 10”.</p>
           <div class="control-group">
             <label class="control-label" for="mission-instruction">Mission objective</label>
             <input id="mission-instruction" class="ark-input" bind:value={missionInstruction} placeholder="Build a habitat at 12, 8" on:keydown={(event) => event.key === 'Enter' && dispatchMission()} />
@@ -1555,8 +1655,18 @@
           <button type="button" class="event-trigger-btn" on:click={dispatchMission} disabled={controlsDisabled}><span>Assign Mission</span></button>
           {#if missionResult}<p class="mission-hint" aria-live="polite">{missionResult}</p>{/if}
           {#if builtHabitats.length}<p class="mission-hint">Built structures: {builtHabitats.join(', ')}</p>{/if}
-          {#if droneIds.length}<p class="mission-hint">Airborne drones: {droneIds.join(', ')}</p>{/if}
-          {#if droneIds.length}<button type="button" class="event-trigger-btn" on:click={recallDrones} disabled={controlsDisabled}><span>Recall Drones to Home</span></button>{/if}
+          {#if collectedSamples.length}<p class="mission-hint">Collected samples: {collectedSamples.join(', ')}</p>{/if}
+          {#if droneSnapshots.length}
+            {#each droneSnapshots as drone (drone.id)}
+              <div class="hud-metric-grid">
+                <div class="hud-metric-item"><span class="hud-metric-label">{drone.id} · live</span><span class="hud-metric-val">{drone.position.y.toFixed(1)} m altitude · {drone.speed.toFixed(1)} m/s</span></div>
+                <div class="hud-metric-item"><span class="hud-metric-label">Position X / Z</span><span class="hud-metric-val">{drone.position.x.toFixed(1)} / {drone.position.z.toFixed(1)} m</span></div>
+              </div>
+              <button type="button" class="event-trigger-btn" on:click={() => trackDrone(drone.id)} disabled={controlsDisabled}><span>Track {drone.id} in View</span></button>
+            {/each}
+            <button type="button" class="event-trigger-btn" on:click={recallDrones} disabled={controlsDisabled}><span>Recall Drones to Home</span></button>
+          {/if}
+          <p class="mission-hint">Autonomy status: rover PPO {ppoPolicy ? `checkpoint · ${ppoPolicy.trainedTimesteps.toLocaleString()} steps${ppoPolicy.evaluationSuccessRate === undefined ? '' : ` · ${Math.round(ppoPolicy.evaluationSuccessRate * 100)}% raw eval success`}` : 'not loaded'}; drone PPO {dronePpoPolicy ? `checkpoint · ${dronePpoPolicy.trainedTimesteps.toLocaleString()} steps${dronePpoPolicy.evaluationSuccessRate === undefined ? '' : ` · ${Math.round(dronePpoPolicy.evaluationSuccessRate * 100)}% raw eval success`}` : dronePpoPolicyError ? 'not trained yet' : 'loading'}. PPO actions are blended with waypoint safety (80% waypoint / 20% PPO); learned cross-agent cooperation is not trained.</p>
         </div>
 
         <!-- Rover Fleet -->
@@ -1676,17 +1786,17 @@
                 class="preset-pill"
                 class:active={roverControlMode === 'ppo'}
                 disabled={ppoPolicyLoading || !ppoPolicy}
-                title={ppoPolicyError ?? 'Run the trained Mars PPO smoke policy'}
+                title={ppoPolicyError ?? `Run Mars PPO (${Math.round((ppoPolicy?.evaluationSuccessRate ?? 0) * 100)}% evaluation success)`}
                 on:click={() => setRoverMode('ppo')}
               >
-                {ppoPolicyLoading ? 'Loading PPO…' : 'PPO Smoke'}
+                {ppoPolicyLoading ? 'Loading PPO…' : (ppoPolicy?.evaluationSuccessRate ?? 0) >= 0.8 ? 'PPO Policy' : 'PPO Experimental'}
               </button>
             </div>
             {#if roverControlMode === 'manual'}
               <p class="mission-hint">Drive: ↑ forward · ↓ reverse · ←/→ turn · B brake</p>
             {:else if roverControlMode === 'ppo'}
               <p class="mission-hint">
-                Mars PPO checkpoint · {ppoPolicy?.trainedTimesteps.toLocaleString()} steps · experimental smoke policy
+                Mars PPO checkpoint · {ppoPolicy?.trainedTimesteps.toLocaleString()} training steps · {ppoPolicy?.evaluationEpisodes ?? 0} evaluation episodes · {Math.round((ppoPolicy?.evaluationSuccessRate ?? 0) * 100)}% success · {(ppoPolicy?.evaluationSuccessRate ?? 0) >= 0.8 ? 'qualified' : 'experimental'}
               </p>
             {/if}
 
@@ -1815,6 +1925,7 @@
           {engine}
           disabled={controlsDisabled}
           onEnvironmentChanged={syncControlsFromEngine}
+          onRobotMission={executeRobotMission}
           notify={showToast}
         />
       </div>

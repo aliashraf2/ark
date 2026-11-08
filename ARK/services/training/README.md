@@ -21,7 +21,7 @@ No HTTP, no browser, no cloud endpoint — everything on one machine.
   `protocol.ts` (request/response validation), `environmentRegistry.ts`
   (multi-env registry), `serialization.ts` (finite-number guard).
 - `python/` — installable `ark_gym` package (`src/ark_gym/`), `tests/`,
-  `examples/smoke_test.py`, `pyproject.toml`.
+  `examples/smoke_test.py`, and PPO train/evaluate/export tools.
 - `benchmark/rlBenchmark.ts`, `examples/randomAgent.ts`, `headless/main.ts` —
   the TS-side benchmark, smoke, and headless CLI from earlier phases.
 
@@ -40,7 +40,7 @@ through the repo-local `node_modules/.bin/tsx`, never a global install.
 ## Commands (repo root)
 
 ```bash
-npm run bridge:test    # pytest suite (25 tests, real physics)
+npm run bridge:test    # pytest suite (real rover and drone physics)
 npm run bridge:smoke   # random-agent episode on Mars
 npm test               # TS suites (physics + rl + simulator + bridge)
 ```
@@ -66,6 +66,8 @@ killing the server; non-finite numbers are rejected, never serialized.
 - Action: `Box((2,), float32)` in [-1, 1] — left/right drive. Malformed
   (shape/finite) raises `ArkValidationError`; finite out-of-range values
   pass through and TypeScript clips them (`info["actionClipped"]`).
+- Drone training uses `agent_type="drone"`, a 9-value normalized state, and
+  three continuous actions for horizontal acceleration and lift offset.
 - `reset(seed, options)` — `options` supports `start`/`target` `{x, z}` and
   `split` ("train"/"eval"); omitted seed uses OS entropy server-side.
 - Rewards, termination (`goal`/`battery-depleted`/`rollover`), and
@@ -85,6 +87,25 @@ determinism holds per seed on one machine (Rapier state is rebuilt each
 reset); bitwise cross-platform equality is not claimed.
 
 ## Colab training environment (Phase 6.4)
+
+Train and evaluate a deployable Mars PPO policy from the repository root:
+
+```bash
+uv run --project services/training/python --group dev \
+  services/training/python/examples/train_ppo_policy.py \
+  --agent rover --steps 500000 --eval-episodes 60
+```
+
+Use `--agent drone` for the aerial policy. The runner saves the SB3 checkpoint,
+browser policy JSON, and per-episode success metrics under
+`colab_artifacts/ppo_policy/`. Dashboard missions are issued by Mission
+Control's CSP-registered `assign_rover_mission` and `assign_drone_mission`
+capabilities; the LLM proposes a typed mission and the operator confirms it
+before a PPO controller is attached. Rover PPO training uses the same bounded,
+yaw-damped actuator shield as the dashboard, with a terminal rollover penalty;
+the 60-episode report is the readiness check. Rover and drone policies are
+trained independently; cooperative radio/task coordination remains a separate
+layer.
 
 `notebooks/ARK_Colab_Setup.ipynb` installs ARK on a hosted Colab Linux
 runtime and validates real physics end to end. Open it via Colab's
