@@ -83,3 +83,29 @@ in one process, use `BridgeClient` directly (`create()` returns env ids, up
 to 8 live). Requests are processed strictly sequentially. Full-episode
 determinism holds per seed on one machine (Rapier state is rebuilt each
 reset); bitwise cross-platform equality is not claimed.
+
+## Colab training environment (Phase 6.4)
+
+`notebooks/ARK_Colab_Setup.ipynb` installs ARK on a hosted Colab Linux
+runtime and validates real physics end to end. Open it via Colab's
+File → Upload notebook (or from GitHub once pushed), set `REPO_URL` in
+section 2, then run top to bottom.
+
+- `scripts/setup_colab.sh [clone|node|npm|python|all]` — idempotent setup
+  stages. Requires Node >= 18 (installs 22 LTS only if older); `npm ci`
+  from the lockfile; no TS build step (repo-local `tsx`). Honors
+  `ARK_REPO_URL` / `ARK_REV` / `ARK_WORK_DIR`; never prints the URL.
+- `scripts/verify_colab.py [--stage versions|planets|gym|benchmark|artifacts|all]`
+  — canonical validation: version/commit record, Earth+Mars smoke tests
+  (planet asserted from simulation metadata, motion measured from Rapier
+  state), `gymnasium.check_env` (+ SB3's checker when installed), bounded
+  throughput benchmark, and `colab_artifacts/ark_colab_diagnostics.json`.
+- Local equivalent: `npm run colab:verify` (uses the uv venv).
+
+Colab notes: Python deps install into the notebook kernel (uv venvs are
+invisible to Colab cells); Gymnasium is pinned from `uv.lock`, NumPy floats
+at `>=1.26` to keep Colab's build when compatible — exact versions land in
+the artifacts. GPU is optional (physics is CPU). Push local 6.3/6.4 work
+before running in Colab: the notebook asserts the checkout contains the
+bridge and training scripts. Hosted-Colab execution itself was not run from
+this machine; see the 6.4 report for the unverified-on-Colab list.

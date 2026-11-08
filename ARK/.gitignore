@@ -16,3 +16,6 @@ __pycache__/
 # Node / build
 node_modules/
 dist/
+
+# Colab diagnostic artifacts (regenerated per run).
+colab_artifacts/
