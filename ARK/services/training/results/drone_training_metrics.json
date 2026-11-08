@@ -1,0 +1,504 @@
+{
+  "agent": "drone",
+  "planet": "mars",
+  "seed": 42,
+  "requested_timesteps": 500000,
+  "actual_timesteps": 500736,
+  "episode_step_limit": 600,
+  "evaluation": {
+    "episodes": 60,
+    "successful_episodes": 4,
+    "success_rate": 0.06666666666666667,
+    "mean_reward": -7.385551872329858,
+    "mean_final_distance_m": 9.058209732460085,
+    "episode_metrics": [
+      {
+        "success": false,
+        "reward": -69.92411348981909,
+        "length": 368,
+        "final_distance_m": 13.261066997468976,
+        "termination_reason": "crash",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": -5.330001243703012,
+        "length": 600,
+        "final_distance_m": 5.920751289361953,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": 4.820031440382996,
+        "length": 600,
+        "final_distance_m": 4.171813327684376,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -9.00625648334219,
+        "length": 600,
+        "final_distance_m": 5.274743573300825,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -4.222443799583106,
+        "length": 600,
+        "final_distance_m": 8.380433362772626,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": 5.244736434868689,
+        "length": 600,
+        "final_distance_m": 6.232348523185619,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -16.529741864511365,
+        "length": 600,
+        "final_distance_m": 11.054681193230838,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -9.280293592961353,
+        "length": 600,
+        "final_distance_m": 10.243015483704683,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -2.712478472222175,
+        "length": 600,
+        "final_distance_m": 11.326899370142813,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -2.6192762431251237,
+        "length": 600,
+        "final_distance_m": 13.967928091411677,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -15.861898042531193,
+        "length": 600,
+        "final_distance_m": 4.798499381904527,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -21.70356373321608,
+        "length": 600,
+        "final_distance_m": 8.774554496583491,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -20.87406545239768,
+        "length": 600,
+        "final_distance_m": 6.807048943142066,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -1.9307764113040458,
+        "length": 600,
+        "final_distance_m": 11.642971151149716,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -21.15745355460502,
+        "length": 600,
+        "final_distance_m": 12.701821283032332,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": 1.0279207804983659,
+        "length": 600,
+        "final_distance_m": 3.160544479025561,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": 0.9066504361993541,
+        "length": 600,
+        "final_distance_m": 7.277060389831436,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -5.259502747887978,
+        "length": 600,
+        "final_distance_m": 2.361129317551381,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": 1.0426742051749773,
+        "length": 600,
+        "final_distance_m": 7.856335297298248,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": 4.036080256288175,
+        "length": 600,
+        "final_distance_m": 8.778295226686517,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -15.83564039993832,
+        "length": 600,
+        "final_distance_m": 6.093185487349146,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -11.364945318749255,
+        "length": 600,
+        "final_distance_m": 2.6310248377542886,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -23.554624853727955,
+        "length": 600,
+        "final_distance_m": 14.127659541272044,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -81.07957606359412,
+        "length": 513,
+        "final_distance_m": 15.724872698033131,
+        "termination_reason": "crash",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": -61.281787320327915,
+        "length": 572,
+        "final_distance_m": 10.799184502296965,
+        "termination_reason": "crash",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": -66.25703394399218,
+        "length": 466,
+        "final_distance_m": 15.357976507568436,
+        "termination_reason": "crash",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": -1.3278245725086522,
+        "length": 600,
+        "final_distance_m": 3.2546972893569928,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": 1.313206093098299,
+        "length": 600,
+        "final_distance_m": 11.449209697241542,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": true,
+        "reward": 136.28046455914355,
+        "length": 233,
+        "final_distance_m": 1.3655411398463917,
+        "termination_reason": "goal",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": 11.699412298994462,
+        "length": 600,
+        "final_distance_m": 5.804685714616127,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -17.417405550384576,
+        "length": 600,
+        "final_distance_m": 12.022630890420707,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -12.836991046258516,
+        "length": 600,
+        "final_distance_m": 13.146140212299082,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -2.8599681569922355,
+        "length": 600,
+        "final_distance_m": 9.753009364358974,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -38.49666916576491,
+        "length": 44,
+        "final_distance_m": 20.590117821856627,
+        "termination_reason": "crash",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": -8.78100617661654,
+        "length": 600,
+        "final_distance_m": 8.8135332173265,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -8.829924267637567,
+        "length": 600,
+        "final_distance_m": 7.036390601409338,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -41.13503716157952,
+        "length": 53,
+        "final_distance_m": 15.980306919326466,
+        "termination_reason": "crash",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": -8.74272333044741,
+        "length": 600,
+        "final_distance_m": 16.75875260735632,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -73.96136925117429,
+        "length": 448,
+        "final_distance_m": 13.82517785702769,
+        "termination_reason": "crash",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": -44.964802592599064,
+        "length": 77,
+        "final_distance_m": 8.497679074252742,
+        "termination_reason": "crash",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": 4.343621320663001,
+        "length": 600,
+        "final_distance_m": 7.648509775100104,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": true,
+        "reward": 110.38832998462335,
+        "length": 525,
+        "final_distance_m": 1.3570218333430861,
+        "termination_reason": "goal",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": 1.5085116380112362,
+        "length": 600,
+        "final_distance_m": 5.458767019001113,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -27.741137914799694,
+        "length": 600,
+        "final_distance_m": 10.583221108833843,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -23.897874114095814,
+        "length": 600,
+        "final_distance_m": 9.177685059605942,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -40.445743605469545,
+        "length": 70,
+        "final_distance_m": 18.43908445903024,
+        "termination_reason": "crash",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": -20.593956820054494,
+        "length": 600,
+        "final_distance_m": 5.9927698680794945,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": true,
+        "reward": 118.26470151541483,
+        "length": 61,
+        "final_distance_m": 1.183278302401127,
+        "termination_reason": "goal",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": 0.23036630424490212,
+        "length": 600,
+        "final_distance_m": 11.38269456783176,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": 9.806104116838773,
+        "length": 600,
+        "final_distance_m": 3.566422529631914,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": 8.246255712795893,
+        "length": 600,
+        "final_distance_m": 9.893800807064158,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -23.73142896508142,
+        "length": 600,
+        "final_distance_m": 7.504588788027022,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -17.851714363191,
+        "length": 600,
+        "final_distance_m": 6.015426466078068,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -13.178113388500211,
+        "length": 600,
+        "final_distance_m": 13.07684939264205,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -25.01221552673179,
+        "length": 600,
+        "final_distance_m": 11.493169203423022,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": true,
+        "reward": 119.37091107559337,
+        "length": 434,
+        "final_distance_m": 1.1924309545794294,
+        "termination_reason": "goal",
+        "truncation_reason": null
+      },
+      {
+        "success": false,
+        "reward": -19.289909840179018,
+        "length": 600,
+        "final_distance_m": 15.904495685370335,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -29.80622563311052,
+        "length": 600,
+        "final_distance_m": 11.410812119957226,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": 10.389722764333268,
+        "length": 600,
+        "final_distance_m": 3.219083142957563,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      },
+      {
+        "success": false,
+        "reward": -25.36529880224305,
+        "length": 600,
+        "final_distance_m": 11.96875570520849,
+        "termination_reason": null,
+        "truncation_reason": "time-limit"
+      }
+    ]
+  },
+  "wall_seconds": 701.361,
+  "model_file": "ark_drone_ppo_mars.zip",
+  "browser_policy_file": "ark_drone_ppo_mars.json",
+  "versions": {
+    "torch": "2.14.1+cpu",
+    "gymnasium": "1.4.0"
+  }
+}
