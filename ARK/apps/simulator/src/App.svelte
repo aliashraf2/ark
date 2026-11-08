@@ -16,6 +16,10 @@
   import type { TelemetryState } from '../../../packages/physics/src/types/SimulationTypes'
   import type { PlanetId } from '../../../packages/physics/src/worlds/PlanetConfig'
   import { profilesForPlanet } from '../../../packages/physics/src/worlds/planetPresets'
+  import { createPpoController, loadBrowserPpoPolicy, type BrowserPpoPolicy } from './lib/robotics/PpoPolicy'
+  import type { CooperativeRescueSnapshot } from './lib/robotics/coordination/CooperativeRescueCoordinator'
+
+  type RoverControlMode = 'manual' | 'navigation' | 'external' | 'ppo'
 
   let container: HTMLDivElement
   let engine: SimulationEngine | null = null
@@ -49,8 +53,12 @@
   let roverIds: string[] = []
   let selectedRover: string | null = null
   let roverSnapshots: RoverSnapshot[] = []
-  let roverControlMode: 'manual' | 'navigation' | 'external' = 'manual'
-  let roverModes: Record<string, 'manual' | 'navigation' | 'external'> = {}
+  let rescueSnapshot: CooperativeRescueSnapshot | null = null
+  let roverControlMode: RoverControlMode = 'manual'
+  let roverModes: Record<string, RoverControlMode> = {}
+  let ppoPolicy: BrowserPpoPolicy | null = null
+  let ppoPolicyLoading = true
+  let ppoPolicyError: string | null = null
   let manualKeys: ManualKeyState = {
     forward: false,
     reverse: false,
@@ -75,6 +83,15 @@
   }
 
   onMount(async () => {
+    void loadBrowserPpoPolicy()
+      .then((policy) => {
+        ppoPolicy = policy
+        ppoPolicyLoading = false
+      })
+      .catch((error) => {
+        ppoPolicyError = error instanceof Error ? error.message : 'Could not load PPO checkpoint.'
+        ppoPolicyLoading = false
+      })
     try {
       await PhysicsWorld.init()
       engine = new SimulationEngine(
@@ -386,6 +403,15 @@
     roverSnapshots = roverIds
       .map((id) => engine?.robots.snapshot(id) ?? null)
       .filter((snapshot): snapshot is RoverSnapshot => snapshot !== null)
+    rescueSnapshot = engine.cooperation.snapshot()
+  }
+
+  function startMarsRescueDemo(): void {
+    if (!engine) return
+    selectedRover = engine.startMarsRescue()
+    roverControlMode = 'navigation'
+    refreshRovers()
+    showToast('Mars multi-rover rescue started · shared physics and radio coordination active')
   }
 
   // Reactive (not a template function call): Svelte must re-render rover
@@ -428,8 +454,22 @@
     }
   }
 
-  function setRoverMode(mode: 'manual' | 'navigation' | 'external'): void {
+  function setRoverMode(mode: RoverControlMode): void {
     if (!engine || !selectedRover) return
+    if (mode === 'ppo') {
+      if (!ppoPolicy) {
+        showToast(ppoPolicyError ?? 'PPO checkpoint is still loading')
+        return
+      }
+      if (envInfo?.planet !== 'mars') selectPlanet('mars')
+      if (!ensureRoverMission()) return
+      engine.robots.setController(selectedRover, createPpoController(ppoPolicy))
+      roverControlMode = mode
+      roverModes[selectedRover] = mode
+      refreshRovers()
+      showToast(`Mars PPO smoke policy active · ${ppoPolicy.trainedTimesteps.toLocaleString()} steps`)
+      return
+    }
     roverControlMode = mode
     roverModes[selectedRover] = mode
     if (mode === 'manual') {
@@ -458,19 +498,15 @@
     }
   }
 
-  function startRoverMission(): void {
-    if (!engine || !selectedRover || !envInfo) return
+  function ensureRoverMission(): boolean {
+    if (!engine || !selectedRover || !envInfo) return false
     const halfExtent = envInfo.terrainWidth / 2 - 4
     const clamp = (value: number): number => Math.max(-halfExtent, Math.min(halfExtent, value))
     const rover = engine.robots.get(selectedRover)
-    if (!rover) return
+    if (!rover) return false
     const existing = engine.robots.missions.missionForRover(selectedRover)
     if (existing) {
-      if (existing.status === 'active') {
-        showToast('Mission already active')
-        return
-      }
-      engine.robots.missions.start(existing.id)
+      if (existing.status === 'pending') engine.robots.missions.start(existing.id)
     } else {
       const mission = engine.robots.missions.create(
         selectedRover,
@@ -481,7 +517,13 @@
       )
       engine.robots.missions.start(mission.id)
     }
-    if ((roverModes[selectedRover] ?? 'manual') !== 'navigation') {
+    return true
+  }
+
+  function startRoverMission(): void {
+    const roverId = selectedRover
+    if (!roverId || !ensureRoverMission()) return
+    if ((roverModes[roverId] ?? 'manual') !== 'navigation') {
       setRoverMode('navigation')
     }
     refreshRovers()
@@ -1491,6 +1533,41 @@
           </div>
         </div>
 
+        <div class="dock-section">
+          <div class="section-title-row">
+            <h3 class="section-title">Cooperative Mars Rescue</h3>
+            <span class="section-badge">{rescueSnapshot?.mission?.phase?.toUpperCase() ?? 'READY'}</span>
+          </div>
+          <p class="mission-hint">Three physical rovers share the Mars world. The explorer gets a scheduled drive fault; support must receive the radio request, accept a capability-matched tow task, rendezvous, and pull it using a force tether.</p>
+          <button type="button" class="event-trigger-btn" on:click={startMarsRescueDemo} disabled={controlsDisabled}>
+            <span>Start Mars Rescue Demo</span>
+          </button>
+          {#if rescueSnapshot?.mission}
+            <div class="hud-metric-grid">
+              <div class="hud-metric-item"><span class="hud-metric-label">Mission</span><span class="hud-metric-val">{rescueSnapshot.mission.phase}</span></div>
+              <div class="hud-metric-item"><span class="hud-metric-label">Tow progress</span><span class="hud-metric-val">{rescueSnapshot.tether.rescuedDistanceM.toFixed(1)} m</span></div>
+              <div class="hud-metric-item"><span class="hud-metric-label">Tether force</span><span class="hud-metric-val">{rescueSnapshot.tether.tensionN.toFixed(0)} N</span></div>
+              <div class="hud-metric-item"><span class="hud-metric-label">Radio</span><span class="hud-metric-val">{rescueSnapshot.network.rangeM} m / {(rescueSnapshot.network.latencyS * 1000).toFixed(0)} ms</span></div>
+            </div>
+            {#each rescueSnapshot.rovers as rover (rover.id)}
+              <p class="mission-hint"><strong>{rover.role}</strong> · {rover.id} · {rover.capabilities.join(', ')} · {(rover.batteryPercent * 100).toFixed(0)}% · motor {rover.motorEnabled ? 'online' : 'failed'} · {rover.missionStatus} · ({rover.position.x.toFixed(1)}, {rover.position.z.toFixed(1)})</p>
+            {/each}
+            {#if rescueSnapshot.task}
+              <p class="mission-hint">Tow task: {rescueSnapshot.task.status} · assigned {rescueSnapshot.task.assignedRobotId ?? '—'}</p>
+            {/if}
+            <div class="mission-hint" aria-live="polite">
+              {#each rescueSnapshot.events as event (event.timeS + event.text)}
+                <div>{event.timeS.toFixed(1)} s · {event.text}</div>
+              {/each}
+            </div>
+            <div class="mission-hint" aria-label="Delivered robot radio messages">
+              {#each rescueSnapshot.messages as message (message.timeS + message.senderId + message.recipientId + message.type)}
+                <div>{message.timeS.toFixed(1)} s · {message.senderId} → {message.recipientId} · {message.type}</div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
         {#if selectedSnap}
           {@const snap = selectedSnap}
           <div class="dock-section">
@@ -1524,9 +1601,23 @@
               >
                 External
               </button>
+              <button
+                type="button"
+                class="preset-pill"
+                class:active={roverControlMode === 'ppo'}
+                disabled={ppoPolicyLoading || !ppoPolicy}
+                title={ppoPolicyError ?? 'Run the trained Mars PPO smoke policy'}
+                on:click={() => setRoverMode('ppo')}
+              >
+                {ppoPolicyLoading ? 'Loading PPO…' : 'PPO Smoke'}
+              </button>
             </div>
             {#if roverControlMode === 'manual'}
               <p class="mission-hint">Drive: ↑ forward · ↓ reverse · ←/→ turn · B brake</p>
+            {:else if roverControlMode === 'ppo'}
+              <p class="mission-hint">
+                Mars PPO checkpoint · {ppoPolicy?.trainedTimesteps.toLocaleString()} steps · experimental smoke policy
+              </p>
             {/if}
 
             <div class="hud-metric-grid">

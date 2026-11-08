@@ -91,6 +91,24 @@ export class RobotManager {
     this.controllers.set(id, controller)
   }
 
+  public disableDriveMotor(id: string): void {
+    const rover = this.rovers.get(id)
+    if (!rover) throw new Error(`No rover ${id}.`)
+    rover.disableDriveMotor()
+  }
+
+  public enableDriveMotor(id: string): void {
+    const rover = this.rovers.get(id)
+    if (!rover) throw new Error(`No rover ${id}.`)
+    rover.enableDriveMotor()
+  }
+
+  public applyExternalForce(id: string, force: Vector3): void {
+    const rover = this.rovers.get(id)
+    if (!rover) throw new Error(`No rover ${id}.`)
+    rover.applyExternalForce(force)
+  }
+
   /** Spawns a rover; id is `rover-N`. View is created when a scene is bound. */
   public spawn(spawn: RoverSpawn, overrides: RoverConfigOverrides = {}, seed?: number): string {
     this.sequence += 1
@@ -134,7 +152,7 @@ export class RobotManager {
       const controller = this.controllers.get(id)
       if (!controller) continue
       rover.updateYawRate(env.dt)
-      const input = this.controlInputFor(id, rover)
+      const input = this.controlInputFor(id, rover, env.traction)
       const action = controller.update(input, env.dt)
       rover.applyAction(action, { gravityMps2: env.gravityMps2, traction: env.traction, dt: env.dt })
     }
@@ -150,7 +168,7 @@ export class RobotManager {
     this.missions.update(dt, positions, bounds)
   }
 
-  public controlInputFor(id: string, rover: Rover): ControlInput {
+  public controlInputFor(id: string, rover: Rover, traction: number): ControlInput {
     const mission = this.missions.missionForRover(id)
     const target = mission ? mission.target : null
     const arrived =
@@ -165,6 +183,9 @@ export class RobotManager {
       ranges: rover.ranges,
       target,
       arrived,
+      batteryPercent: rover.battery().percent,
+      traction,
+      roverConfig: rover.config,
     }
   }
 

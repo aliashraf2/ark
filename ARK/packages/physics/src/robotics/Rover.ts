@@ -45,6 +45,7 @@ export class Rover {
   private chargeJ: number
   private lastPowerW = 0
   private lastAction = { left: 0, right: 0, brake: false, eStop: false }
+  private driveMotorEnabled = true
   private random: () => number
   private lastRanges: RangeReading[] = []
   private lastYaw: number
@@ -162,10 +163,35 @@ export class Rover {
     return this.chargeJ <= 0
   }
 
+  public get motorEnabled(): boolean {
+    return this.driveMotorEnabled
+  }
+
+  public get commandedEffort(): number {
+    return Math.max(Math.abs(this.lastAction.left), Math.abs(this.lastAction.right))
+  }
+
+  /** Explicit, observable fault injection: disables drive force and yaw torque. */
+  public disableDriveMotor(): void {
+    this.driveMotorEnabled = false
+  }
+
+  public enableDriveMotor(): void {
+    this.driveMotorEnabled = true
+  }
+
+  /** Applies a real world-space force, used by the cooperative recovery tether. */
+  public applyExternalForce(force: Vector3): void {
+    this.body.addForce(force, true)
+  }
+
   /** Applies one validated action as forces for this fixed step. Pure-computed. */
   public applyAction(action: DriveAction, ctx: RoverStepContext): void {
     const validated = validateAction(action)
     this.lastAction = validated
+    const applied = this.driveMotorEnabled
+      ? validated
+      : validateAction({ left: 0, right: 0, brake: false, eStop: false })
     const driveCtx: DriveContext = {
       massKg: this.massKg,
       gravityMps2: ctx.gravityMps2,
@@ -175,7 +201,7 @@ export class Rover {
       dt: ctx.dt,
       chargeJ: this.chargeJ,
     }
-    const output = computeDrive(this.config, validated, driveCtx)
+    const output = computeDrive(this.config, applied, driveCtx)
     this.body.resetForces(false)
     this.body.addForce(output.force, true)
     this.body.addTorque(output.torque, true)
@@ -183,7 +209,7 @@ export class Rover {
       const v = this.body.linvel()
       this.body.setLinvel({ x: 0, y: v.y, z: 0 }, true)
     }
-    this.lastPowerW = powerDrawW(this.config, validated)
+    this.lastPowerW = this.driveMotorEnabled ? powerDrawW(this.config, validated) : this.config.idlePowerW
     this.chargeJ = stepBatteryCharge(this.chargeJ, this.lastPowerW, ctx.dt)
   }
 
@@ -245,6 +271,7 @@ export class Rover {
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true)
     this.body.resetForces(false)
     this.chargeJ = this.config.batteryCapacityJ
+    this.driveMotorEnabled = true
     this.lastPowerW = 0
     this.random = mulberry32(seed)
     this.senseRanges()

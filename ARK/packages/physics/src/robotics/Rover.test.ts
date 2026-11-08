@@ -130,6 +130,31 @@ describe('Test C — drive commands move the rover', () => {
     }
   })
 
+  it('stops drive effort after a motor fault but remains movable by an external tow force', () => {
+    const world = flatWorld()
+    try {
+      const rover = new Rover(
+        world,
+        'rover-fault',
+        resolveRoverConfig(),
+        { position: { x: 0, y: 0.05, z: 0 } },
+        33,
+      )
+      driveSteps(world, rover, { left: 0, right: 0, brake: true, eStop: false }, 60)
+      rover.disableDriveMotor()
+      driveSteps(world, rover, { left: 1, right: 1, brake: false, eStop: false }, 90)
+      expect(Math.abs(rover.position.z)).toBeLessThan(0.1)
+      for (let i = 0; i < 60; i += 1) {
+        rover.applyAction({ left: 0, right: 0, brake: false, eStop: false }, stepContext())
+        rover.applyExternalForce({ x: 0, y: 0, z: 1200 })
+        world.step()
+      }
+      expect(rover.position.z).toBeGreaterThan(1)
+    } finally {
+      world.free()
+    }
+  })
+
   it('yaws under differential effort', () => {
     const world = flatWorld()
     try {

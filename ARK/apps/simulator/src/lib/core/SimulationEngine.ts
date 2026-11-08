@@ -16,6 +16,7 @@ import type { PlanetConfig, PlanetId } from '../../../../../packages/physics/src
 import { getPlanet } from '../../../../../packages/physics/src/worlds/planetPresets'
 import { EnvironmentManager, SPAWN_CLEARANCE, type EnvironmentInfo } from './EnvironmentManager'
 import { SimulationClock } from '../../../../../packages/physics/src/core/SimulationClock'
+import { CooperativeRescueCoordinator } from '../robotics/coordination/CooperativeRescueCoordinator'
 
 export type { StartEventSpec }
 
@@ -35,6 +36,7 @@ export class SimulationEngine {
   public readonly environment: EnvironmentManager
   public readonly envController: EnvironmentController
   public readonly robots: RobotManager
+  public readonly cooperation: CooperativeRescueCoordinator
 
   private readonly clock = new SimulationClock()
   private readonly cameraController: CameraController
@@ -84,6 +86,7 @@ export class SimulationEngine {
       this.sceneManager.scene,
       (accentColor, config) => new RoverView(accentColor, config),
     )
+    this.cooperation = new CooperativeRescueCoordinator(this.robots, (x, z, seed) => this.spawnRover(x, z, seed))
     this.environment.switchPlanet('earth')
     this.physicsWorld.createWindTestBox(this.boxSpawnPoint())
     this.snapBoxToPhysics()
@@ -157,11 +160,11 @@ export class SimulationEngine {
               gravityMps2: Math.abs(this.physicsWorld.gravity.y),
               traction: this.physicsWorld.terrainFriction,
             })
+            this.cooperation.beforePhysics()
             this.physicsWorld.step(dt)
+            this.robots.postStep(dt, { halfExtent: this.environment.info.terrainWidth / 2 })
+            this.cooperation.update(dt, simTime + dt)
           }
-          this.robots.postStep(steps * dt, {
-            halfExtent: this.environment.info.terrainWidth / 2,
-          })
           this.pushBodyStates()
           this.robots.pushVisuals()
         }
@@ -233,6 +236,16 @@ export class SimulationEngine {
   public switchPlanet(planet: PlanetId): void {
     const info = this.environment.switchPlanet(planet)
     this.environmentCallback?.(info)
+  }
+
+  /** Starts the physical multi-rover Mars rescue scenario in the current world. */
+  public startMarsRescue(seed = this.environment.info.seed): string {
+    if (this.environment.info.planet !== 'mars') this.switchPlanet('mars')
+    this.cooperation.dispose()
+    // A rescue is for communication and physical recovery, not a terrain
+    // solvability contest; use Mars's existing low-relief basin profile.
+    if (this.environment.info.profileId !== 'smooth-basin') this.setTerrainProfile('smooth-basin')
+    return this.cooperation.startMarsRescue(seed, this.clock.elapsed)
   }
 
   public regenerateTerrain(seed?: number): void {
@@ -446,6 +459,7 @@ export class SimulationEngine {
 
     window.removeEventListener('resize', this.handleResize)
     this.cameraController.dispose()
+    this.cooperation.dispose()
     this.robots.dispose()
     this.sceneManager.dispose()
     this.physicsWorld.dispose()

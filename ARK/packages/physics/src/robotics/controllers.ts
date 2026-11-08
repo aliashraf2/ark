@@ -1,5 +1,5 @@
 import type { Vector3 } from '../types/SimulationTypes'
-import type { DriveAction, RangeReading } from './RoverConfig'
+import type { DriveAction, RangeReading, RoverConfig } from './RoverConfig'
 import { headingControlAction, validateAction } from './RoverDynamics'
 
 /**
@@ -16,6 +16,9 @@ export interface ControlInput {
   ranges: ReadonlyArray<RangeReading>
   target: Vector3 | null
   arrived: boolean
+  batteryPercent?: number
+  traction?: number
+  roverConfig?: RoverConfig
 }
 
 export interface Controller {

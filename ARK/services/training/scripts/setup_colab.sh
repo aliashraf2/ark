@@ -69,7 +69,7 @@ stage_npm() {
   log "Installing npm workspaces (npm ci) in $WORK_DIR"
   (cd "$WORK_DIR" && npm ci --no-audit --no-fund)
   [ -x "$WORK_DIR/node_modules/.bin/tsx" ] || die "tsx missing after npm ci."
-  log "tsx OK. Rapier: $((cd "$WORK_DIR" && node -p "require('./node_modules/@dimforge/rapier3d-compat/package.json').version"))"
+  log "tsx OK. Rapier: $(cd "$WORK_DIR" && node -p "require('./node_modules/@dimforge/rapier3d-compat/package.json').version")"
 }
 
 stage_python() {
