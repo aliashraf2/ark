@@ -43,12 +43,18 @@ class VoiceConfig:
 
 
 def voice_access(request: Request) -> None:
-    """Local development API, bound to loopback; reject cross-site spending.
+    """Reject cross-site spending in local and authenticated public deployments.
 
     CORS alone isn't authorization. The custom header forces a preflight and we
     also validate Origin/Host on the actual request, before contacting ElevenLabs.
-    A public deployment needs real user authentication instead of this local guard.
+    Public deployments first pass the authenticated gateway middleware.
     """
+    if getattr(request.app.state, "public_origin", ""):
+        # PublicAccessMiddleware already checked the gateway token, Host and
+        # exact origin. Retain the voice-specific preflight/client header.
+        if request.headers.get("x-ark-voice") != "1":
+            raise HTTPException(403, "Missing voice client header.")
+        return
     host = request.url.hostname
     if host not in {"localhost", "127.0.0.1", "::1", "testserver"}:
         raise HTTPException(403, "Voice API is available on localhost only.")

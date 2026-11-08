@@ -21,7 +21,11 @@
   import { createDronePpoAction, loadDronePpoPolicy, type DronePpoPolicy } from './lib/robotics/DronePpoPolicy'
   import type { CooperativeRescueSnapshot } from './lib/robotics/coordination/CooperativeRescueCoordinator'
 
-  type RoverControlMode = 'manual' | 'navigation' | 'external' | 'ppo'
+  import { RoverQController, validateQPolicy, useRoverQ, type RoverQPolicy } from '../../../packages/rl/src/policies/RoverQPolicy'
+  import roverQCheckpoint from '../../../packages/rl/policies/rover-q-mars.json'
+  validateQPolicy(roverQCheckpoint)
+  const roverQ: RoverQPolicy = roverQCheckpoint
+  type RoverControlMode = 'manual' | 'navigation' | 'external' | 'ppo' | 'q'
 
   let container: HTMLDivElement
   let engine: SimulationEngine | null = null
@@ -533,11 +537,11 @@
     if (active) engine.robots.missions.abort(active.id)
     const mission = engine.robots.missions.create(id, rover.position, { x: target.x, y: 0, z: target.z }, 2, 240)
     engine.robots.missions.start(mission.id)
-    const usePpo = ppoPolicy !== null
-    engine.robots.setController(id, usePpo ? createPpoController(ppoPolicy!) : new NavigationController())
-    roverModes[id] = usePpo ? 'ppo' : 'navigation'
+    const useQ = useRoverQ(roverQ, engine.environment.info.planet, roverControlMode === 'q')
+    engine.robots.setController(id, useQ ? new RoverQController(roverQ) : new NavigationController())
+    roverModes[id] = useQ ? 'q' : 'navigation'
     selectedRover = id
-    roverControlMode = usePpo ? 'ppo' : 'navigation'
+    roverControlMode = roverModes[id]!
     if (build) builderMissions[id] = { ...target, missionId: mission.id }
     if (sample) {
       const sampleId = engine.placeSample(target.x, target.z)
@@ -545,7 +549,7 @@
     }
     engine.setFollowRover(id)
     followRoverEnabled = true
-    missionResult = `${id} assigned ${usePpo ? 'PPO' : 'waypoint'} control to ${build ? 'construct a habitat' : sample ? 'collect a soil sample' : 'navigate'} at (${target.x}, ${target.z}) on ${engine.environment.info.displayName}.`
+    missionResult = `${id} assigned ${useQ ? 'Q-learning navigation' : 'waypoint'} control to ${build ? 'construct a habitat' : sample ? 'collect a soil sample' : 'navigate'} at (${target.x}, ${target.z}) on ${engine.environment.info.displayName}.`
     refreshRovers()
   }
 
@@ -576,11 +580,11 @@
     if (active) engine.robots.missions.abort(active.id)
     const mission = engine.robots.missions.create(id, rover.position, { x: target.x, y: 0, z: target.z }, 2, 240)
     engine.robots.missions.start(mission.id)
-    const usePpo = ppoPolicy !== null
-    engine.robots.setController(id, usePpo ? createPpoController(ppoPolicy!) : new NavigationController())
-    roverModes[id] = usePpo ? 'ppo' : 'navigation'
+    const useQ = useRoverQ(roverQ, engine.environment.info.planet, roverControlMode === 'q')
+    engine.robots.setController(id, useQ ? new RoverQController(roverQ) : new NavigationController())
+    roverModes[id] = useQ ? 'q' : 'navigation'
     selectedRover = id
-    roverControlMode = usePpo ? 'ppo' : 'navigation'
+    roverControlMode = roverModes[id]!
     if (task === 'build_habitat') builderMissions[id] = { ...target, missionId: mission.id }
     if (task === 'collect_sample') {
       const sampleId = engine.placeSample(target.x, target.z)
@@ -588,8 +592,7 @@
     }
     engine.setFollowRover(id)
     followRoverEnabled = true
-    const successRate = ppoPolicy?.evaluationSuccessRate
-    missionResult = `${id} assigned ${usePpo ? `PPO-assisted waypoint${successRate === undefined ? '' : ` (${Math.round(successRate * 100)}% raw-policy eval success)`}` : 'waypoint'} control for ${task.replace('_', ' ')} at (${target.x}, ${target.z}).`
+    missionResult = `${id} assigned ${useQ ? 'Q-learning navigation (experimental)' : 'waypoint'} control for ${task.replace('_', ' ')} at (${target.x}, ${target.z}).`
     refreshRovers()
     return missionResult
   }
@@ -640,6 +643,14 @@
 
   function setRoverMode(mode: RoverControlMode): void {
     if (!engine || !selectedRover) return
+    if (mode === 'q') {
+      if (engine.environment.info.planet !== 'mars') { showToast('Q-learning checkpoint is evaluated on Mars only'); return }
+      engine.robots.setController(selectedRover, new RoverQController(roverQ))
+      roverModes[selectedRover] = 'q'
+      roverControlMode = 'q'
+      showToast('Rover Q-learning navigation active')
+      return
+    }
     if (mode === 'ppo') {
       if (!ppoPolicy) {
         showToast(ppoPolicyError ?? 'PPO checkpoint is still loading')
@@ -1792,8 +1803,11 @@
                 {ppoPolicyLoading ? 'Loading PPO…' : (ppoPolicy?.evaluationSuccessRate ?? 0) >= 0.8 ? 'PPO Policy' : 'PPO Experimental'}
               </button>
             </div>
+            <button type="button" class="preset-pill" class:active={roverControlMode === 'q'} on:click={() => setRoverMode('q')}>Q-learning Rover</button>
             {#if roverControlMode === 'manual'}
               <p class="mission-hint">Drive: ↑ forward · ↓ reverse · ←/→ turn · B brake</p>
+            {:else if roverControlMode === 'q'}
+              <p class="mission-hint">Q-learning · {roverQ.trainedSteps.toLocaleString()} transitions · {roverQ.trainingSeconds.toFixed(1)} seconds training · {Math.round((roverQ.evaluation?.successRate ?? 0) * 100)}% success on {roverQ.evaluation?.episodes ?? 0} held-out Mars scenarios. Navigation gains are learned; this is not a raw wheel-torque policy.</p>
             {:else if roverControlMode === 'ppo'}
               <p class="mission-hint">
                 Mars PPO checkpoint · {ppoPolicy?.trainedTimesteps.toLocaleString()} training steps · {ppoPolicy?.evaluationEpisodes ?? 0} evaluation episodes · {Math.round((ppoPolicy?.evaluationSuccessRate ?? 0) * 100)}% success · {(ppoPolicy?.evaluationSuccessRate ?? 0) >= 0.8 ? 'qualified' : 'experimental'}

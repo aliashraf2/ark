@@ -14,6 +14,17 @@ def make_agent(agent_dirs, responses):
     return MissionAgent(llm=FakeLLM(responses), planner_dir=agent_dirs["planner"])
 
 
+def test_orchestrator_keeps_writable_state_in_agent_data(agent_dirs, tmp_path, monkeypatch):
+    working = tmp_path / "source"
+    working.mkdir()
+    monkeypatch.chdir(working)
+    MissionAgent(llm=None)
+    assert (agent_dirs["data"] / "planner").is_dir()
+    assert (agent_dirs["data"] / "credentials").is_dir()
+    assert not (working / "credentials").exists()
+    assert not (working / "planner").exists()
+
+
 def plan_for(capability, args, description="test step"):
     return json.dumps(
         {
@@ -103,6 +114,8 @@ async def test_llm_goal_exposes_rover_capability_on_both_planets(agent_dirs, wor
     assert "Rover spawn/navigation commands" not in prompt
     assert "experimental" in prompt
     assert "0% success" in prompt
+    assert "Q-learning" in prompt
+    assert "roverLearning" in prompt
 
 
 async def test_capability_call_rejects_invalid_args(agent_dirs):

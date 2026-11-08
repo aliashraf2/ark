@@ -1,0 +1,58 @@
+services:
+  agent:
+    image: ark-agent:${ARK_RELEASE:?}
+    build:
+      context: ../..
+      dockerfile: deploy/vultr/Dockerfile
+      target: agent
+    restart: unless-stopped
+    environment:
+      ARK_PUBLIC_ORIGIN: ${ARK_PUBLIC_ORIGIN:?}
+      ARK_PROXY_TOKEN: ${ARK_PROXY_TOKEN:?}
+      ARK_CORS_ORIGINS: ${ARK_PUBLIC_ORIGIN:?}
+    volumes:
+      - /opt/ark/shared/agent:/app/services/agent/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, -c, "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/api/health',headers={'X-ARK-Proxy-Token':os.environ['ARK_PROXY_TOKEN']}); urllib.request.urlopen(r,timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+  gateway:
+    image: ark-web:${ARK_RELEASE:?}
+    build:
+      context: ../..
+      dockerfile: deploy/vultr/Dockerfile
+      target: gateway
+    restart: unless-stopped
+    depends_on:
+      agent: {condition: service_healthy}
+    environment:
+      ARK_PUBLIC_HOST: ${ARK_PUBLIC_HOST:?}
+      ARK_DASHBOARD_USER: ${ARK_DASHBOARD_USER:?}
+      ARK_DASHBOARD_HASH: ${ARK_DASHBOARD_HASH:?}
+      ARK_PROXY_TOKEN: ${ARK_PROXY_TOKEN:?}
+    ports: ['80:80', '443:443']
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: [CMD, wget, -q, --spider, 'http://127.0.0.1:8080/healthz']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+volumes:
+  caddy_data:
+  caddy_config:

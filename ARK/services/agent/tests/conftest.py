@@ -22,7 +22,7 @@ def agent_dirs(tmp_path, monkeypatch):
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_MODEL", raising=False)
     monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
-    for name in ("MUSE_API_KEY", "MODEL_API_KEY", "MUSE_MODEL", "ARK_LLM_PROVIDER"):
+    for name in ("MUSE_API_KEY", "MODEL_API_KEY", "MUSE_MODEL", "ARK_LLM_PROVIDER", "ARK_PUBLIC_ORIGIN", "ARK_PROXY_TOKEN", "ARK_CORS_ORIGINS"):
         monkeypatch.delenv(name, raising=False)
     return {"data": data, "planner": str(planner)}
 

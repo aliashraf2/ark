@@ -22,3 +22,14 @@ colab_artifacts/
 
 # ark-colab.sh local runs, logs, downloads, and session pointer (no creds).
 artifacts/
+
+# Deployment state/credentials are local only. Commit the provider lock file.
+.deploy/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log
+.dev-rover/

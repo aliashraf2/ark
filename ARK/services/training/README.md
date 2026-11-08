@@ -1,5 +1,7 @@
 # ARK Training Infrastructure
 
+Fast rover-only Q-learning experiment: [training, results and separate preview](ROVER_Q.md).
+
 Python ↔ TypeScript RL bridge (Phase 6.3) over the headless Rapier core
 (6.1) and the `reset()`/`step()` environment API (6.2).
 

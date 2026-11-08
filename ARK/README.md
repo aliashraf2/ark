@@ -19,6 +19,16 @@ Agent Link box asks for one. Ctrl-C stops everything.
 
 Custom ports: `AGENT_PORT=8000 SIM_PORT=5173 ./scripts/dev.sh`
 
+## Deploy to Vultr
+
+```bash
+./scripts/deploy-vultr.sh
+```
+
+Terraform provisions a VM; the launcher deploys ARK with HTTPS and a dashboard
+login. It prompts for a Vultr token and plan approval. See the
+[deployment guide](deploy/vultr/README.md) for domains, API keys, updates and cleanup.
+
 ## Verify everything (one command)
 
 ```bash

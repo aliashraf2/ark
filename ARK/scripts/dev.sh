@@ -43,7 +43,7 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 (cd "$ROOT/services/agent" && uv run uvicorn app:app --port "$AGENT_PORT" 2>&1 | sed 's/^/[agent] /') &
-(cd "$ROOT/apps/simulator" && npm run dev -- --port "$SIM_PORT" 2>&1 | sed 's/^/[sim] /') &
+(cd "$ROOT/apps/simulator" && npm run dev -- --port "$SIM_PORT" --strictPort 2>&1 | sed 's/^/[sim] /') &
 
 # Wait for both servers, then hand off URLs.
 if command -v curl >/dev/null 2>&1; then
@@ -61,7 +61,7 @@ echo ""
 echo "==> ARK is up:"
 echo "    simulator: http://localhost:$SIM_PORT/   <-- open this in your browser"
 echo "    agent API: http://localhost:$AGENT_PORT/api/health"
-echo "    (If :$SIM_PORT was busy, Vite picked another port — see the [sim] lines above.)"
+echo "    (Strict port mode: this checkout never selects another frontend port.)"
 echo "    Press Ctrl-C to stop everything."
 echo ""
 

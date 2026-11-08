@@ -9,6 +9,7 @@ export interface BodySnapshot {
 
 /** Point-in-time world snapshot: the verified truth the agent reports from. */
 export interface WorldStateSnapshot {
+  roverLearning?: { algorithm: string; trainedSteps: number; trainingSeconds: number; evaluation: unknown; scope: string }
   planet: PlanetId
   planetDisplayName: string
   simTime: number

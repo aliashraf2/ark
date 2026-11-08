@@ -1,0 +1,37 @@
+{
+	admin off
+}
+
+# Container-only readiness probe; this port is never published by Compose.
+http://127.0.0.1:8080 {
+	bind 127.0.0.1
+	respond /healthz "ok" 200
+}
+
+{$ARK_PUBLIC_HOST} {
+	basic_auth {
+		{$ARK_DASHBOARD_USER} {$ARK_DASHBOARD_HASH}
+	}
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		Permissions-Policy "microphone=(self)"
+		X-Frame-Options DENY
+	}
+	@private path /.env* /.git/* /terraform/* /deploy/*
+	respond @private 404
+
+	handle /api/* {
+		reverse_proxy agent:8000 {
+			header_up X-ARK-Proxy-Token {$ARK_PROXY_TOKEN}
+			header_up -Authorization
+			flush_interval -1
+		}
+	}
+	handle {
+		root * /srv
+		encode zstd gzip
+		try_files {path} /index.html
+		file_server
+	}
+}

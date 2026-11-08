@@ -24,6 +24,7 @@ from agent import AgentNotConfigured, MissionAgent
 from llm import LLMConfig, create_llm, create_llm_from_env
 from world_commands import load_protocol
 from voice import router as voice_router
+from public_access import PublicAccessMiddleware, public_settings
 
 
 def env_file_path() -> Path:
@@ -172,6 +173,8 @@ def create_app(
     agent = MissionAgent(llm=resolved_llm, planner_dir=planner_dir)
 
     app = FastAPI(title="ARK Mission Control", version="4.1.0")
+    public_origin, proxy_token = public_settings()
+    app.state.public_origin = public_origin
     app.include_router(voice_router)
     cors_override = os.environ.get("ARK_CORS_ORIGINS")
     if cors_override:
@@ -190,6 +193,8 @@ def create_app(
             allow_headers=["Content-Type", "X-ARK-Voice"],
         )
     app.state.agent = agent
+    if public_origin:
+        app.add_middleware(PublicAccessMiddleware, origin=public_origin, token=proxy_token)
     app.state.planner_dir = planner_dir
     app.state.llm_config = resolved_config
 

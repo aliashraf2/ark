@@ -6,7 +6,7 @@ import { getTerrainHeight } from '../terrain/terrainSampling'
 import { mulberry32 } from '../terrain/terrainNoise'
 import type { Vector3 } from '../types/SimulationTypes'
 import { FIXED_TIME_STEP } from '../types/SimulationTypes'
-import { ExternalController } from './controllers'
+import { ExternalController, type Controller } from './controllers'
 import type { MissionBounds } from './MissionManager'
 import { RobotManager } from './RobotManager'
 import {
@@ -115,6 +115,7 @@ export class RoverEnv {
     rover: RoverConfigOverrides
   }
   private readonly external: ExternalController
+  private controller: Controller | null = null
 
   private pendingAction: DriveAction = { ...NEUTRAL_ACTION }
   private missionId: string | null = null
@@ -162,7 +163,7 @@ export class RoverEnv {
     })
     this.manager = new RobotManager(this.world, null)
     this.roverId = this.manager.spawn(spawn, this.config.rover, seed)
-    this.manager.setController(this.roverId, this.external)
+    this.manager.setController(this.roverId, this.controller ?? this.external)
   }
 
   private destroyWorld(): void {
@@ -312,6 +313,13 @@ export class RoverEnv {
       traction: this.traction,
       target: mission ? mission.target : null,
     })
+  }
+
+  /** Training and browser use the same controller and per-physics-step inputs. */
+  public setController(controller: Controller): void {
+    this.controller = controller
+    controller.reset()
+    this.manager.setController(this.roverId, controller)
   }
 
   public getReward(): number {

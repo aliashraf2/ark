@@ -54,6 +54,13 @@ no live Muse API request was made without an account key.
 The simulator calls this service at `http://localhost:8000`
 (override with `VITE_AGENT_URL`).
 
+For public hosting, use the [Vultr deployment launcher](../../deploy/vultr/README.md).
+Production serves the UI and API from the same HTTPS origin, authenticates users
+at the gateway, and keeps the backend port private. `ARK_PUBLIC_ORIGIN` enables
+the backend's gateway-token/Host/Origin guard; it requires `ARK_PROXY_TOKEN`.
+The launcher supplies both privately. Local development retains its localhost
+voice guard. Do not expose the development Uvicorn port as a public dashboard.
+
 ## API
 
 - `GET /api/health` — status, LLM configuration, provider/model, protocol version.

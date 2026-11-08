@@ -1,3 +1,4 @@
+import roverQ from '../../../../../packages/rl/policies/rover-q-mars.json'
 import { EnvironmentController, type StartEventSpec } from '../../../../../packages/physics/src/environment/EnvironmentController'
 import { getScenario } from '../../../../../packages/physics/src/environment/eventPresets'
 import { surfaceAt } from '../../../../../packages/physics/src/environment/SurfaceSystem'
@@ -115,6 +116,9 @@ export class SimulationEngine {
     const info = this.environment.info
     return {
       planet: info.planet,
+      roverLearning: { algorithm: 'Q-learning over navigation gains', trainedSteps: roverQ.trainedSteps,
+        trainingSeconds: roverQ.trainingSeconds, evaluation: roverQ.evaluation,
+        scope: 'Available checkpoint: Mars, seed 42, cratered-plains, 5–12m goals; evaluation is not a live mission outcome.' },
       planetDisplayName: info.displayName,
       simTime: this.clock.elapsed,
       status: this.currentStatus,

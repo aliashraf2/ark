@@ -62,7 +62,8 @@
   }
 
   const AGENT_URL =
-    (import.meta.env?.['VITE_AGENT_URL'] as string | undefined) ?? 'http://localhost:8000'
+    (import.meta.env?.['VITE_AGENT_URL'] as string | undefined) ??
+    (import.meta.env.DEV ? 'http://localhost:8000' : '')
 
   let client = new MissionClient(AGENT_URL)
   let dispatcher: CommandDispatcher | null = null

@@ -10,6 +10,8 @@
     "packages/rl"
   ],
   "scripts": {
+    "rover:train": "tsx services/training/trainRoverQ.ts",
+    "rover:dev": "bash scripts/dev-rover.sh",
     "bridge:smoke": "uv run --project services/training/python --group dev services/training/python/examples/smoke_test.py",
     "bridge:test": "uv run --project services/training/python --group dev pytest -q services/training/python/tests --rootdir services/training/python",
     "colab:verify": "uv run --project services/training/python --group dev services/training/scripts/verify_colab.py --stage all",

@@ -21,6 +21,7 @@ from csp import BaseLLM, LLMResponse, Orchestrator
 from llm import create_llm_from_env  # noqa: F401  (re-exported for app/tests)
 from synthesis import (
     SYNTHESIS_GUIDANCE,
+    data_dir,
     load_approved,
     save_approved,
     validate_synthesis_spec,
@@ -216,13 +217,12 @@ def register_world_capabilities(app: Orchestrator) -> None:
 
 
 def build_orchestrator(llm: BaseLLM | None, planner_dir: str | None = None) -> Orchestrator:
-    from pathlib import Path
-
-    directory = planner_dir or str(Path(__file__).resolve().parent / "data" / "planner")
+    directory = planner_dir or str(data_dir() / "planner")
     app: Orchestrator = Orchestrator(
         "ark-mission-control",
         llm=llm,  # type: ignore[arg-type]
         planner_dir=directory,
+        credentials_dir=str(data_dir() / "credentials"),
         synthesis_guidance=SYNTHESIS_GUIDANCE,
     )
     register_world_capabilities(app)
@@ -387,8 +387,10 @@ class MissionAgent:
             "aerial scouting. Each needs explicit target_x and target_z coordinates in meters; "
             "ask_clarification if either is missing. These are simulated deployments and require "
             "operator confirmation; never claim they executed before simulator acknowledgement. "
-            "The rover PPO policy is experimental: its latest held-out cratered-Mars evaluation "
-            "had 0% success, so never promise reliable completion. Earth missions are supported "
+            "This rover experiment uses Q-learning to select bounded navigation gains for Mars missions. "
+            "Use roverLearning in the current snapshot for measured training/evaluation results, not invented rates. "
+            "Evaluation success is not proof of a live mission outcome. Never promise reliable completion. "
+            "The legacy rover PPO checkpoint had 0% success. Earth missions are supported "
             "by the simulator but policy performance on Earth is not established. "
             "CSP may compose validated existing world commands, but it does not invent or train "
             "new robot skills. Dust optical depth does not guarantee an exact requested "
