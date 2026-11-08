@@ -40,6 +40,7 @@ _CONFIG_KEYS: dict[str, str] = {
     "reward_weights": "rewardWeights",
     "rover": "rover",
     "terrain_subdivisions": "terrainSubdivisions",
+    "terrain_profile": "terrainProfile",
 }
 
 

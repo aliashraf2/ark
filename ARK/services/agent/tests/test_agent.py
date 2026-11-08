@@ -77,6 +77,34 @@ async def test_rover_mission_capability_proposes_validated_rl_task(agent_dirs):
     assert envelope["action"]["requires_confirmation"] is True
 
 
+@pytest.mark.parametrize("planet", ["mars", "earth"])
+async def test_llm_goal_exposes_rover_capability_on_both_planets(agent_dirs, world_state, planet):
+    state = {**world_state, "planet": planet}
+    agent = make_agent(
+        agent_dirs,
+        [
+            plan_for(
+                "assign_rover_mission",
+                {"planet": planet, "task": "navigate", "target_x": 4, "target_z": 6},
+            ),
+            "Rover mission proposed.",
+        ],
+    )
+
+    result = await agent.interpret("Send a rover to 4, 6.", state)
+
+    assert result.status == "proposed"
+    assert len(result.actions) == 1
+    assert result.actions[0].command == "assign_rover_mission"
+    assert result.actions[0].params == {"task": "navigate", "target_x": 4.0, "target_z": 6.0}
+    assert result.actions[0].requires_confirmation is True
+    prompt = agent._llm.calls[0][0]["content"]
+    assert "assign_rover_mission" in prompt
+    assert "Rover spawn/navigation commands" not in prompt
+    assert "experimental" in prompt
+    assert "0% success" in prompt
+
+
 async def test_capability_call_rejects_invalid_args(agent_dirs):
     """Planner-proposed garbage is rejected by the proposal functions, not executed."""
     agent = make_agent(agent_dirs, [])

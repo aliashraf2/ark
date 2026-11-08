@@ -105,7 +105,7 @@ export class ArkEnvironment {
     await PhysicsWorld.init()
     const planet = getPlanet(resolved.planet)
     const heightfield = generateHeightfield(
-      { ...resolveTerrainParams(planet), subdivisions: resolved.terrainSubdivisions },
+      { ...resolveTerrainParams(planet, resolved.terrainProfile), subdivisions: resolved.terrainSubdivisions },
       resolved.terrainSeed,
     )
     const env = new RoverEnv({

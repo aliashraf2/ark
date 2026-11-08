@@ -1,6 +1,7 @@
 import { DEFAULT_REWARD_WEIGHTS, type EnvRewardWeights } from '../../../physics/src/robotics/RoverEnv'
 import type { RoverConfigOverrides } from '../../../physics/src/robotics/RoverConfig'
 import type { PlanetId } from '../../../physics/src/worlds/PlanetConfig'
+import { profilesForPlanet } from '../../../physics/src/worlds/planetPresets'
 
 /**
  * RL environment configuration. Only planet + terrainSeed are required;
@@ -44,6 +45,8 @@ export interface ArkEnvironmentConfig {
    * feeds physics here as rendering in the browser for identical parameters.
    */
   terrainSubdivisions?: number
+  /** Named planet terrain profile; defaults to the planet's deployment profile. */
+  terrainProfile?: string
 }
 
 export type ResolvedArkEnvironmentConfig = Required<Omit<ArkEnvironmentConfig, 'rewardWeights' | 'rover'>> & {
@@ -95,6 +98,7 @@ export function resolveEnvironmentConfig(config: ArkEnvironmentConfig): Resolved
     rewardWeights: config.rewardWeights ?? DEFAULT_REWARD_WEIGHTS,
     rover: config.rover ?? {},
     terrainSubdivisions: config.terrainSubdivisions ?? 160,
+    terrainProfile: config.terrainProfile ?? (config.planet === 'mars' ? 'cratered-plains' : 'rolling-hills'),
   }
   const positiveInt = (name: 'actionRepeat' | 'maxSteps' | 'terrainSubdivisions'): void => {
     if (!Number.isInteger(resolved[name]) || resolved[name] <= 0) {
@@ -104,6 +108,9 @@ export function resolveEnvironmentConfig(config: ArkEnvironmentConfig): Resolved
   positiveInt('actionRepeat')
   positiveInt('maxSteps')
   positiveInt('terrainSubdivisions')
+  if (!profilesForPlanet(resolved.planet).some((profile) => profile.id === resolved.terrainProfile)) {
+    throw new Error(`Unknown terrain profile "${resolved.terrainProfile}" for planet "${resolved.planet}".`)
+  }
   if (resolved.terrainSubdivisions < 8) {
     throw new Error(`Config terrainSubdivisions must be >= 8, got ${resolved.terrainSubdivisions}.`)
   }

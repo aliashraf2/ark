@@ -17,12 +17,14 @@ describe('resolveEnvironmentConfig', () => {
     expect(resolved.sensorNoiseSigmaM).toBe(0)
     expect(resolved.tractionMultiplier).toBe(1)
     expect(resolved.terrainSubdivisions).toBe(160)
+    expect(resolved.terrainProfile).toBe('cratered-plains')
   })
 
   it('keeps explicit overrides', () => {
     const resolved = resolveEnvironmentConfig({ ...BASE, actionRepeat: 2, maxSteps: 10 })
     expect(resolved.actionRepeat).toBe(2)
     expect(resolved.maxSteps).toBe(10)
+    expect(resolveEnvironmentConfig({ ...BASE, terrainProfile: 'smooth-basin' }).terrainProfile).toBe('smooth-basin')
   })
 
   it.each([
@@ -37,6 +39,8 @@ describe('resolveEnvironmentConfig', () => {
     ['negative traction', { tractionMultiplier: -1 }],
     ['inverted goal band', { goalMinDistanceM: 40, goalMaxDistanceM: 15 }],
     ['tiny subdivisions', { terrainSubdivisions: 4 }],
+    ['unknown terrain profile', { terrainProfile: 'not-a-mars-profile' }],
+    ['wrong planet terrain profile', { terrainProfile: 'rolling-hills' }],
     ['non-finite weight', { rewardWeights: { progress: 2, success: 100, collision: -5, energy: Number.NaN, time: -0.2 } }],
   ])('throws on invalid config (%s)', (_label, overrides) => {
     // Intentionally invalid values: cast through to test runtime validation.
